@@ -6,7 +6,7 @@
   align-items:center;
   padding:10px 24px;
   box-sizing:border-box;
-  background:linear-gradient(90deg,#ffffff, #F7F9F7);
+  background:linear-gradient(180deg,#ECF9F0,#F7FFF5);
   border-bottom:1px solid var(--border-gray);
   position:fixed;
   top:0;
@@ -20,7 +20,7 @@
 .nav-right{display:flex;align-items:center;gap:18px;margin-left:auto}
 .nav-link{position:relative; color:var(--text-dark); text-decoration:none; padding:8px 6px; font-weight:600}
 
-.brand-text { font-weight:700; color:var(--primary); }
+.brand-text { font-weight:700; color:var(--primary); top: -17px; position: relative; }
 
 /* underline fill-up effect using pseudo element */
 .nav{
@@ -80,6 +80,12 @@
 .mobile-toggle:hover .hamburger::before{transform:translateY(3px) scaleX(1.05)}
 .mobile-toggle:hover .hamburger div{transform:translateX(3px)}
 .mobile-toggle:hover .hamburger::after{transform:translateY(-3px) scaleX(0.95)}
+
+/* Logout button styling used in header */
+.logout-btn{
+  display:inline-flex;align-items:center;gap:8px;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:transparent;color:var(--text-dark);cursor:pointer;text-decoration:none;font-weight:700
+}
+.logout-btn:hover{background:rgba(255,255,255,0.04);transform:translateY(-2px);transition:all .18s}
 
 @media(max-width:920px){
   .nav-right{gap:12px}

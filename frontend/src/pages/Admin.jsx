@@ -1,5 +1,5 @@
 import React, { useContext, useState, useEffect } from 'react'
-import { BridgesContext } from '../App'
+import { BridgesContext } from '../contexts/BridgesContext'
 import Sidebar from '../components/Sidebar'
 import Topbar from '../components/Topbar'
 import { Doughnut, Bar, Line } from 'react-chartjs-2'
@@ -13,8 +13,8 @@ export default function Admin(){
 
   useEffect(()=>{
     const handler = ()=> setAsideOpen(v=>!v)
-    window.addEventListener('toggleSidebar', handler)
-    return ()=> window.removeEventListener('toggleSidebar', handler)
+    window.addEventListener('bqi-toggle-sidebar', handler)
+    return ()=> window.removeEventListener('bqi-toggle-sidebar', handler)
   },[])
 
   const total = bridges.length

@@ -1,4 +1,5 @@
-import React, { createContext, useEffect, useState } from 'react'
+import React, { useEffect, useState } from 'react'
+import { BridgesContext } from './contexts/BridgesContext'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import './App.css'
 import './index.css'
@@ -11,12 +12,14 @@ import Login from './pages/Login'
 import Admin from './pages/Admin'
 import AdminReports from './pages/admin/Reports'
 import AdminUsers from './pages/admin/Users'
-import User from './pages/User'
+import UserReports from './pages/user/Reports'
+import SafetyTips from './pages/user/SafetyTips'
+import UserLayout from './pages/user/UserLayout'
+import UserDashboard from './pages/user/Dashboard'
 import sampleBridges from './data/sampleBridges'
 import mockApi from './lib/mockApi'
 import Footer from './components/Footer'
 
-export const BridgesContext = createContext()
 
 function App() {
   const [bridges, setBridges] = useState([])
@@ -60,7 +63,11 @@ function App() {
               <Route path="/admin" element={user?.role === 'admin' ? <Admin /> : <Navigate to="/login" />} />
               <Route path="/admin/reports" element={user?.role === 'admin' ? <AdminReports /> : <Navigate to="/login" />} />
               <Route path="/admin/users" element={user?.role === 'admin' ? <AdminUsers /> : <Navigate to="/login" />} />
-              <Route path="/user" element={user ? <User /> : <Navigate to="/login" />} />
+              <Route path="/user/*" element={<UserLayout /> }>
+                <Route index element={<UserDashboard />} />
+                <Route path="reports" element={<UserReports />} />
+                <Route path="tips" element={<SafetyTips />} />
+              </Route>
               <Route path="*" element={<Navigate to="/" />} />
             </Routes>
           </main>

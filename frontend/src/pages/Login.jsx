@@ -1,6 +1,6 @@
 import React, { useContext, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { BridgesContext } from '../App'
+import { BridgesContext } from '../contexts/BridgesContext'
 
 export default function Login(){
   const { setUser } = useContext(BridgesContext)

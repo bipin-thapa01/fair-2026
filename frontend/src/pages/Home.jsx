@@ -1,5 +1,5 @@
 import React, { useContext, useMemo } from 'react'
-import { BridgesContext } from '../App'
+import { BridgesContext } from '../contexts/BridgesContext'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend, CategoryScale, LinearScale, BarElement } from 'chart.js'
 import { Doughnut, Bar } from 'react-chartjs-2'
 import { classification } from '../utils/bqi'

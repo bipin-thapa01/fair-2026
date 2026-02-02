@@ -1,5 +1,5 @@
 import React, { useContext } from 'react'
-import { BridgesContext } from '../App'
+import { BridgesContext } from '../contexts/BridgesContext'
 
 function greeting(){
   const h = new Date().getHours()

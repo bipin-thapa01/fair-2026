@@ -20,6 +20,57 @@
 /* Full-page helper for pages to fill viewport minus nav */
 .page-full{min-height:calc(100vh - 64px);width:100%;box-sizing:border-box}
 .card{background:#fff;border:1px solid #e6e9ef;padding:16px;border-radius:8px;margin-bottom:16px}
+/* User section specific */
+.page-full{background:linear-gradient(180deg,#ECF9F0,#F7FFF5)}
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:12px}
+.stat-card{background:#fff;border:1px solid var(--border-gray);padding:12px;border-radius:10px;display:flex;flex-direction:column;gap:6px;align-items:flex-start;box-shadow:0 8px 20px rgba(8,30,20,0.04)}
+.stat-card h3{margin:0;color:var(--primary);font-size:1.2rem}
+.stat-card .value{font-size:1.6rem;font-weight:800;color:var(--accent)}
+
+/* Chart container reveal animations */
+.chart-container{height:280px;background:transparent;border-radius:8px;padding:8px}
+.reveal{opacity:1;transform:none;transition:opacity .6s ease,transform .6s ease}
+.hidden-reveal{opacity:0;transform:translateY(12px)}
+
+/* Notifications */
+.notifications-list{display:flex;flex-direction:column;gap:8px}
+.notification{padding:10px;border-radius:8px;border:1px solid var(--border-gray);background:#fff}
+
+/* Toasts */
+.toast-wrap{position:fixed;right:18px;bottom:18px;z-index:120;display:flex;flex-direction:column;gap:8px}
+.toast{padding:10px 12px;border-radius:8px;color:#fff;min-width:220px;box-shadow:0 12px 30px rgba(8,30,20,0.12)}
+.toast.success{background:linear-gradient(90deg,#16a34a,#22c55e)}
+.toast.error{background:linear-gradient(90deg,#ef4444,#f97316)}
+
+/* Safety tips hover */
+.safety-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
+.safety-card{background:#fff;border-radius:10px;padding:14px;box-shadow:0 8px 18px rgba(8,30,20,0.04);transition:transform .18s,box-shadow .18s}
+.safety-card:hover{transform:translateY(-6px);box-shadow:0 18px 40px rgba(8,30,20,0.08);border-left:4px solid var(--accent)}
+
+/* Form controls */
+input, textarea, select { width:100%; padding:8px; border:1px solid var(--border-gray); border-radius:8px; box-sizing:border-box }
+label{display:block;font-weight:600}
+
+/* Chart container responsive */
+.chart-container{min-height:220px}
+
+@media(max-width:900px){
+  .chart-container{height:220px}
+  .stats-grid{grid-template-columns:repeat(auto-fit,minmax(140px,1fr))}
+}
+
+@media(max-width:600px){
+  .container{padding:10px}
+  .constrain{padding:8px}
+}
+
+/* Page transitions: fade in/out for route changes */
+.page-init{opacity:0;transform:translateY(8px);transition:opacity .42s ease,transform .42s ease}
+.page-mounted{opacity:1;transform:none}
+
+/* small helpers for accessibility */
+.btn.primary{background:linear-gradient(90deg,var(--primary),var(--accent));color:#fff;border:none;padding:8px 12px;border-radius:8px}
+.btn{background:transparent;border:1px solid var(--border-gray);padding:8px 10px;border-radius:8px}
 .dashboard-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 .admin-grid{display:grid;grid-template-columns:360px 1fr;gap:16px}
 .bridge-form label{display:block;margin-bottom:8px}
