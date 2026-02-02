@@ -7,6 +7,7 @@ import com.app.bridgeQuality.dto.MLResponseDTO;
 import com.app.bridgeQuality.entity.Bridge;
 import com.app.bridgeQuality.entity.BridgeHealthLog;
 import com.app.bridgeQuality.entity.MLOutputLog;
+import com.app.bridgeQuality.entity.enums.BridgeStatus;
 import com.app.bridgeQuality.repository.BridgeHealthLogRepository;
 import com.app.bridgeQuality.repository.BridgeRepository;
 import com.app.bridgeQuality.repository.MLOutputLogRepository;
@@ -66,6 +67,11 @@ public class BridgeHealthService {
 
         mlOutputLogRepository.save(mlLog);
 
+        // UPDATE BRIDGE STATUS BASED ON ML OUTPUT
+        String updatedStatus = mapHealthStateToBridgeStatus(mlResponse.getHealthState());
+        bridge.setStatus(BridgeStatus.valueOf(updatedStatus));
+        bridgeRepository.save(bridge);
+
         // Return response
         BridgeHealthLogResponseDTO responseDTO = new BridgeHealthLogResponseDTO();
         responseDTO.setLogId(log.getId());
@@ -75,5 +81,18 @@ public class BridgeHealthService {
         responseDTO.setRecommendedAction(mlResponse.getRecommendedAction());
 
         return responseDTO;
+    }
+
+    private String mapHealthStateToBridgeStatus(String healthState) {
+        if (healthState == null) return "FAIR";
+
+        return switch (healthState.toUpperCase()) {
+            case "EXCELLENT" -> "EXCELLENT";
+            case "GOOD" -> "GOOD";
+            case "FAIR" -> "FAIR";
+            case "POOR" -> "POOR";
+            case "CRITICAL" -> "CRITICAL";
+            default -> "FAIR"; // fallback
+        };
     }
 }

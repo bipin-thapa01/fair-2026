@@ -22,7 +22,4 @@ public class HealthLogController {
         BridgeHealthLogResponseDTO response = bridgeHealthService.processSensorData(inputDTO);
         return ResponseEntity.ok(response);
     }
-
-    @GetMapping
-    public List<>
 }
