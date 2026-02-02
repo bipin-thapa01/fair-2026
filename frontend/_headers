@@ -1,0 +1,35 @@
+/*
+  Access control for static assets and API responses.
+  Configure Netlify to add this file at build root to set headers.
+*/
+/*
+  Allow any origin for demo purposes. For production restrict to known origins.
+*/
+/*  Add CORS header */
+/* Apply to all routes */
+/* NOTE: set Access-Control-Allow-Origin to specific domains for production */
+/* Example: Access-Control-Allow-Origin: https://example.com */
+
+/* Set headers for all files */
+/* /    Means root and all nested paths */
+/* CORS */
+/* Ensure SPA pushState works with redirects if needed */
+
+/* All routes */
+/* Add a simple permissive CORS header for demo */
+/* Use carefully in production */
+/* Syntax: Path\n  Header-Name: value */
+
+/* Root and everything */
+/* / */
+/* Access-Control-Allow-Origin: * */
+
+/* Provide for JSON API responses */
+/*.json
+  Access-Control-Allow-Origin: *
+*/
+
+/* Add a fallback HTML header so SPA works */
+/* /index.html
+  Access-Control-Allow-Origin: *
+*/
