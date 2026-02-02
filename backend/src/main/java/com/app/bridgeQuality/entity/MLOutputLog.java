@@ -12,12 +12,12 @@ import java.util.UUID;
 @NoArgsConstructor
 @Entity
 @Table(name = "ml_output_log")
-public class MlOutputLog {
+public class MLOutputLog {
     @Id
     @GeneratedValue
     private UUID id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "bridge_log_ref")
     private BridgeHealthLog bridgeLogRef;
 

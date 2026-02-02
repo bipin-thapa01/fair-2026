@@ -24,26 +24,8 @@ public class BridgeHealthLog {
     @Column(name = "strain_microstrain", nullable = false)
     private Double strainMicrostrain;
 
-    @Column(name = "deflection_mm", nullable = false)
-    private Double deflectionMm;
-
-    @Column(name = "localized_strain_hotspot", nullable = false)
-    private Double localizedStrainHotspot;
-
     @Column(name = "vibration_ms2", nullable = false)
     private Double vibrationMs2;
-
-    @Column(name = "seismic_activity_ms2", nullable = false)
-    private Double seismicActivityMs2;
-
-    @Column(name = "impact_events_g", nullable = false)
-    private Double impactEventsG;
-
-    @Column(name = "modal_frequency_hz", nullable = false)
-    private Double modalFrequencyHz;
-
-    @Column(name = "energy_dissipation_au", nullable = false)
-    private Double energyDissipationAu;
 
     @Column(name = "temperature_c", nullable = false)
     private Double temperatureC;
