@@ -1,12 +1,13 @@
 package com.app.bridgeQuality.controller;
 
+import com.app.bridgeQuality.dto.BridgeCreateRequest;
 import com.app.bridgeQuality.entity.Bridge;
 import com.app.bridgeQuality.repository.BridgeRepository;
+import com.app.bridgeQuality.service.BridgeService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 import java.util.Optional;
@@ -17,6 +18,7 @@ import java.util.Optional;
 public class BridgeController {
 
     public final BridgeRepository bridgeRepository;
+    public final BridgeService bridgeService;
 
     @GetMapping
     public List<Bridge> bridgeList() {
@@ -26,6 +28,12 @@ public class BridgeController {
     @GetMapping("/{id}")
     public Optional<Bridge> getBridge(@PathVariable String id) {
         return bridgeRepository.findById(id);
+    }
+
+    @PostMapping("/addNew")
+    public ResponseEntity<?> uploadBridge(@RequestBody BridgeCreateRequest request) {
+        bridgeService.createBridge(request);
+        return ResponseEntity.status(HttpStatus.CREATED).build();
     }
 
 }

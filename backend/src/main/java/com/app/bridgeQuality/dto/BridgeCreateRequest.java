@@ -1,6 +1,5 @@
 package com.app.bridgeQuality.dto;
 
-
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -8,11 +7,8 @@ import lombok.NoArgsConstructor;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class BridgeHealthLogResponseDTO {
-
-    private String logId;
-    private int healthIndex;
-    private String healthState;
-    private String recommendedAction;
-
+public class BridgeCreateRequest {
+    private String name;
+    private Double latitude;
+    private Double longitude;
 }
