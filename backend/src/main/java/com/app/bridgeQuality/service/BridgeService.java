@@ -1,6 +1,7 @@
 package com.app.bridgeQuality.service;
 
 import com.app.bridgeQuality.dto.BridgeCreateRequest;
+import com.app.bridgeQuality.dto.BridgeResponse;
 import com.app.bridgeQuality.entity.Bridge;
 import com.app.bridgeQuality.entity.enums.BridgeStatus;
 import com.app.bridgeQuality.repository.BridgeRepository;
@@ -39,5 +40,15 @@ public class BridgeService {
                 .build();
 
         bridgeRepository.save(bridge);
+    }
+
+    public BridgeResponse toResponse(Bridge bridge) {
+        return new BridgeResponse(
+                bridge.getId(),
+                bridge.getName(),
+                bridge.getStatus(),
+                bridge.getLocation().getY(), // latitude
+                bridge.getLocation().getX()  // longitude
+        );
     }
 }

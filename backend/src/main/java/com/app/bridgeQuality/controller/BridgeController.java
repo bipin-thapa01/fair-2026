@@ -1,16 +1,16 @@
 package com.app.bridgeQuality.controller;
 
 import com.app.bridgeQuality.dto.BridgeCreateRequest;
-import com.app.bridgeQuality.entity.Bridge;
+import com.app.bridgeQuality.dto.BridgeResponse;
 import com.app.bridgeQuality.repository.BridgeRepository;
 import com.app.bridgeQuality.service.BridgeService;
 import lombok.RequiredArgsConstructor;
+import org.jetbrains.annotations.NotNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/bridge")
@@ -21,13 +21,19 @@ public class BridgeController {
     public final BridgeService bridgeService;
 
     @GetMapping
-    public List<Bridge> bridgeList() {
-        return bridgeRepository.findAll();
+    public List<BridgeResponse> bridgeList() {
+        return bridgeRepository.findAll()
+                .stream()
+                .map(bridgeService::toResponse)
+                .toList();
     }
 
     @GetMapping("/{id}")
-    public Optional<Bridge> getBridge(@PathVariable String id) {
-        return bridgeRepository.findById(id);
+    public ResponseEntity<@NotNull BridgeResponse> getBridge(@PathVariable String id) {
+        return bridgeRepository.findById(id)
+                .map(bridgeService::toResponse)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping("/addNew")
