@@ -11,10 +11,12 @@ import com.app.bridgeQuality.entity.enums.BridgeStatus;
 import com.app.bridgeQuality.repository.BridgeHealthLogRepository;
 import com.app.bridgeQuality.repository.BridgeRepository;
 import com.app.bridgeQuality.repository.MLOutputLogRepository;
+import lombok.AllArgsConstructor;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Service;
 
 @Service
+@AllArgsConstructor
 public class BridgeHealthService {
 
     private final BridgeRepository bridgeRepository;
@@ -22,22 +24,10 @@ public class BridgeHealthService {
     private final MLOutputLogRepository mlOutputLogRepository;
     private final MLService mlService;
 
-    public BridgeHealthService(
-            BridgeRepository bridgeRepository,
-            BridgeHealthLogRepository bridgeHealthLogRepository,
-            MLOutputLogRepository mlOutputLogRepository,
-            MLService mlService
-    ) {
-        this.bridgeRepository = bridgeRepository;
-        this.bridgeHealthLogRepository = bridgeHealthLogRepository;
-        this.mlOutputLogRepository = mlOutputLogRepository;
-        this.mlService = mlService;
-    }
-
     public BridgeHealthLogResponseDTO processSensorData(@NotNull BridgeHealthLogRequestDTO inputDTO) {
 
         // Validate bridge
-        Bridge bridge = bridgeRepository.findById(String.valueOf(inputDTO.getBridgeId()))
+        Bridge bridge = bridgeRepository.findById(inputDTO.getBridgeId())
                 .orElseThrow(() -> new RuntimeException("Bridge not found"));
 
         // Save raw sensor data
@@ -46,14 +36,16 @@ public class BridgeHealthService {
         log.setStrainMicrostrain(inputDTO.getStrainMicrostrain());
         log.setVibrationMs2(inputDTO.getVibrationMs2());
         log.setTemperatureC(inputDTO.getTemperatureC());
+        log.setHumidityPercent(inputDTO.getHumidityPercent());
 
         log = bridgeHealthLogRepository.save(log);
 
         // Send to ML model
         MLRequestDTO mlRequest = new MLRequestDTO();
-        mlRequest.setStrainMicrostrain(inputDTO.getStrainMicrostrain());
-        mlRequest.setVibrationMs2(inputDTO.getVibrationMs2());
-        mlRequest.setTemperatureC(inputDTO.getTemperatureC());
+        mlRequest.setStrain_microstrain(inputDTO.getStrainMicrostrain());
+        mlRequest.setVibration_ms2(inputDTO.getVibrationMs2());
+        mlRequest.setTemperature_C(inputDTO.getTemperatureC());
+        mlRequest.setHumidity_percent(inputDTO.getHumidityPercent());
 
         MLResponseDTO mlResponse = mlService.sendToModel(mlRequest);
 
@@ -62,7 +54,6 @@ public class BridgeHealthService {
         mlLog.setBridgeLogRef(log);
         mlLog.setHealthIndex(mlResponse.getHealthIndex());
         mlLog.setHealthState(mlResponse.getHealthState());
-        mlLog.setConfidence(mlResponse.getConfidence());
         mlLog.setRecommendedAction(mlResponse.getRecommendedAction());
 
         mlOutputLogRepository.save(mlLog);
@@ -74,10 +65,9 @@ public class BridgeHealthService {
 
         // Return response
         BridgeHealthLogResponseDTO responseDTO = new BridgeHealthLogResponseDTO();
-        responseDTO.setLogId(log.getId());
+        responseDTO.setLogId(String.valueOf(log.getId()));
         responseDTO.setHealthIndex(mlResponse.getHealthIndex());
         responseDTO.setHealthState(mlResponse.getHealthState());
-        responseDTO.setConfidence(mlResponse.getConfidence());
         responseDTO.setRecommendedAction(mlResponse.getRecommendedAction());
 
         return responseDTO;

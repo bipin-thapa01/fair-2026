@@ -28,14 +28,16 @@ public class MLOutputLog {
     @Column(name = "health_state", nullable = false, length = 25)
     private String healthState;
 
-    @Column(name = "confidence", nullable = false)
-    private Double confidence;
-
     @Column(name = "recommended_action", nullable = false, length = 50)
     private String recommendedAction;
 
     @ColumnDefault("now()")
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = OffsetDateTime.now();
+    }
 
 }

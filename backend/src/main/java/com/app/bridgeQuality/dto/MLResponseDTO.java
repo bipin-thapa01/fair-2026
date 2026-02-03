@@ -9,7 +9,6 @@ public class MLResponseDTO {
 
     private int healthIndex;
     private String healthState;
-    private double confidence;
     private String recommendedAction;
 
 }

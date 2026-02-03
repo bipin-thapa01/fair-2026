@@ -30,8 +30,16 @@ public class BridgeHealthLog {
     @Column(name = "temperature_c", nullable = false)
     private Double temperatureC;
 
+    @Column(name = "humidity_percent", nullable = false)
+    private Double humidityPercent;
+
     @ColumnDefault("now()")
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = OffsetDateTime.now();
+    }
 
 }

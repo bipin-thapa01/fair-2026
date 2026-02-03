@@ -9,8 +9,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class MLRequestDTO {
 
-    private Double strainMicrostrain;
-    private Double vibrationMs2;
-    private Double temperatureC;
+    private Double Strain_microstrain;
+    private Double Vibration_ms2;
+    private Double Temperature_C;
+    private Double Humidity_percent;
 
 }

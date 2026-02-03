@@ -12,10 +12,9 @@ import java.util.UUID;
 @NoArgsConstructor
 public class BridgeHealthLogResponseDTO {
 
-    private UUID logId;
+    private String logId;
     private int healthIndex;
     private String healthState;
-    private double confidence;
     private String recommendedAction;
 
 }

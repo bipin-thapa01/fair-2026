@@ -10,7 +10,7 @@ public class MLService {
 
     private final RestTemplate restTemplate = new RestTemplate();
 //    endpoint to reach the ML model
-    private static final String ML_ENDPOINT = "http://localhost:8000/predict"; // Example
+    private static final String ML_ENDPOINT = "http://localhost:5000/predict";
 
     public MLResponseDTO sendToModel(MLRequestDTO requestDTO) {
         return restTemplate.postForObject(ML_ENDPOINT, requestDTO, MLResponseDTO.class);
