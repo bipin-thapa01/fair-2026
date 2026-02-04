@@ -12,6 +12,8 @@ import Login from './pages/Login'
 import Admin from './pages/Admin'
 import AdminReports from './pages/admin/Reports'
 import AdminUsers from './pages/admin/Users'
+import AdminBridgeManagement from './pages/admin/BridgeManagement'
+import ReportsNew from './pages/ReportsNew'
 import UserReports from './pages/user/Reports'
 import SafetyTips from './pages/user/SafetyTips'
 import UserLayout from './pages/user/UserLayout'
@@ -59,10 +61,12 @@ function App() {
                 <Route path="/home" element={<Home />} />
               <Route path="/about" element={<About />} />
               <Route path="/maps" element={<MapsPage />} />
+              <Route path="/reports" element={<ReportsNew />} />
               <Route path="/login" element={<Login />} />
               <Route path="/admin" element={user?.role === 'admin' ? <Admin /> : <Navigate to="/login" />} />
               <Route path="/admin/reports" element={user?.role === 'admin' ? <AdminReports /> : <Navigate to="/login" />} />
               <Route path="/admin/users" element={user?.role === 'admin' ? <AdminUsers /> : <Navigate to="/login" />} />
+              <Route path="/admin/bridges" element={user?.role === 'admin' ? <AdminBridgeManagement /> : <Navigate to="/login" />} />
               <Route path="/user/*" element={<UserLayout /> }>
                 <Route index element={<UserDashboard />} />
                 <Route path="reports" element={<UserReports />} />

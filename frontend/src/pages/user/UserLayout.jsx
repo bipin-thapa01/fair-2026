@@ -1,12 +1,12 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect, useContext } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { useContext } from 'react'
 import { BridgesContext } from '../../contexts/BridgesContext'
 import UserSidebar from '../../components/UserSidebar'
+import Topbar from '../../components/Topbar'
 import './userLayout.css'
 
 export default function UserLayout(){
-  const [asideOpen, setAsideOpen] = useState(true)
+  const [asideOpen, setAsideOpen] = useState(false)
   const navigate = useNavigate()
 
   const location = useLocation()
@@ -20,22 +20,23 @@ export default function UserLayout(){
 
   const { user } = useContext(BridgesContext)
 
+  useEffect(() => {
+    const handler = () => setAsideOpen(v => !v)
+    window.addEventListener('bqi-toggle-sidebar', handler)
+    return () => window.removeEventListener('bqi-toggle-sidebar', handler)
+  }, [])
+
   return (
-    <div style={{display:'flex',minHeight:'calc(100vh - 64px)'}}>
+    <div className="page-full" style={{display:'flex', background: '#F8FAFC', minHeight:'100vh'}}>
       <UserSidebar open={asideOpen} />
-      <div style={{flex:1, position:'relative'}}>
-        <div style={{display:'flex',alignItems:'center',gap:12,padding:12,borderBottom:'1px solid var(--border-gray)',background:'linear-gradient(180deg,#ECF9F0,#F7FFF5)'}}>
-          <button aria-label="Toggle sidebar" onClick={()=>setAsideOpen(v=>!v)} style={{border:'none',background:'transparent',fontSize:20,cursor:'pointer'}}>☰</button>
-          <div style={{flex:1}}>
-            <div style={{fontSize:18,fontWeight:700,color:'var(--primary)'}}>{title}</div>
-          </div>
+      <div style={{flex:1, overflow: 'auto'}}>
+        <Topbar onToggle={() => setAsideOpen(v => !v)} />
+
+        <div className="container" style={{ padding: '24px' }}>
+          <main>
+            <Outlet />
+          </main>
         </div>
-
-
-
-        <main>
-          <Outlet />
-        </main>
       </div>
     </div>
   )

@@ -2,6 +2,7 @@ import React, { useContext, useState, useMemo, useEffect } from 'react'
 import { BridgesContext } from '../contexts/BridgesContext'
 import { classification } from '../utils/bqi'
 import UserSidebar from '../components/UserSidebar'
+import Topbar from '../components/Topbar'
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, ArcElement, Title, Tooltip, Legend } from 'chart.js'
 import { Line, Bar, Doughnut } from 'react-chartjs-2'
 
@@ -9,7 +10,7 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 
 export default function User(){
   const { bridges, user } = useContext(BridgesContext)
-  const [asideOpen, setAsideOpen] = useState(true)
+  const [asideOpen, setAsideOpen] = useState(false)
   const [chartVisible, setChartVisible] = useState(false)
   const [notifications, setNotifications] = useState([])
   const [mounted, setMounted] = useState(false)
@@ -119,8 +120,8 @@ export default function User(){
     <div className={`page-full ${mounted ? 'page-mounted' : 'page-init'}`} style={{display:'flex'}}>
       <UserSidebar open={asideOpen} />
       <div style={{flex:1}}>
+        <Topbar onToggle={() => setAsideOpen(v => !v)} />
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:12}}>
-          <button onClick={()=>{ window.dispatchEvent(new CustomEvent('bqi-toggle-sidebar')); setAsideOpen(v=>!v) }} style={{border:'none',background:'transparent',cursor:'pointer'}}>☰</button>
           <div style={{fontWeight:700}}>User Dashboard</div>
           <div>
             <strong>Flagged:</strong> {pending}
