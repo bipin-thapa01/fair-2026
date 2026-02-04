@@ -30,7 +30,7 @@ float humidity_percent;
 
 const char* ssid = "wifi_not_available";
 const char* pass = "bit123987";
-const char* api = "http://172.20.10.2:8080/api/bridgeHealth/ingest";
+const char* api = "http://10.10.0.249:8080/api/bridgeHealth/ingest";
 
 // Constants
 long ADC_ZERO = -136900;
@@ -84,7 +84,7 @@ void loop() {
   z_acc = a.acceleration.z;
 
   vibration_ms2 = sqrt(x_acc*x_acc + y_acc*y_acc + z_acc*z_acc);
-  float normalizedVibration_ms2 = vibration_ms2/12;
+  float normalizedVibration_ms2 = fabs((vibration_ms2 - 9.8)/(20-9.8));
 
   // Read DHT11
   float humidity = dht.readHumidity();
@@ -98,23 +98,24 @@ void loop() {
   }
 
   // Read HX711
-  if(scale.is_ready()){
-    long sum_adc = 0;
-    const int samples = 20;
-    for(int i = 0; i < samples; i++){
-      sum_adc += scale.read();
-      delay(50);
-    }
-    long adc_avg = sum_adc / samples;
-    long adc_net = adc_avg - ADC_ZERO;
+  if (scale.is_ready()) {
+  long sum_adc = 0;
+  const int samples = 20;
 
-  // Convert to microstrain (µε) and weight (gm)
-    strainMicrostrain = adc_net * STRAIN_PER_ADC;
-    // float weight = adc_net * GRAMS_PER_ADC;
-    Serial.print("Strain (µε): ");
-    Serial.println(strainMicrostrain);
+  for (int i = 0; i < samples; i++) {
+    sum_adc += scale.read();
+    delay(10);
+  }
 
-    float normalizedStrain = strainMicrostrain/15;
+  long adc_avg = sum_adc / samples;
+  long adc_net = adc_avg - ADC_ZERO;
+
+  // Convert ADC to microstrain (needs calibration!)
+  strainMicrostrain = adc_net * STRAIN_PER_ADC;
+
+  // Normalize safely
+  const float MAX_STRAIN = 500.0; // µε (design limit)
+  float normalizedStrain = fabs(strainMicrostrain);
 
   if(WiFi.status() == WL_CONNECTED){
     HTTPClient http;
@@ -123,10 +124,10 @@ void loop() {
 
     String jsonData = "{";
     jsonData += "\"bridgeId\": \"BRIDGE-001\",";
-    jsonData += "\"vibration\": " + String(normalizedVibration_ms2, 2) + ",";
-    jsonData += "\"temperature\": " + String(normalizedTemperature, 2) + ",";
-    jsonData += "\"humidity\": " + String(normalizedHumidity, 2) + ",";
-    jsonData += "\"Strain_microstrain\": " + String(normalizedStrain, 2);
+    jsonData += "\"vibrationMs2\": " + String(normalizedVibration_ms2, 2) + ",";
+    jsonData += "\"temperatureC\": " + String(normalizedTemperature, 2) + ",";
+    jsonData += "\"humidityPercent\": " + String(normalizedHumidity, 2) + ",";
+    jsonData += "\"strainMicrostrain\": " + String(normalizedStrain, 2);
     jsonData += "}";
 
     int resCode = http.POST(jsonData);
@@ -139,5 +140,5 @@ void loop() {
   } else {
     Serial.println("HX711 not found.");
   }
-  delay(30000);
+  delay(2000);
 }
