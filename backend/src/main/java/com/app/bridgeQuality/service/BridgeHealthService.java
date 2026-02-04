@@ -1,9 +1,6 @@
 package com.app.bridgeQuality.service;
 
-import com.app.bridgeQuality.dto.BridgeHealthLogRequestDTO;
-import com.app.bridgeQuality.dto.BridgeHealthLogResponseDTO;
-import com.app.bridgeQuality.dto.MLRequestDTO;
-import com.app.bridgeQuality.dto.MLResponseDTO;
+import com.app.bridgeQuality.dto.*;
 import com.app.bridgeQuality.entity.Bridge;
 import com.app.bridgeQuality.entity.BridgeHealthLog;
 import com.app.bridgeQuality.entity.MLOutputLog;
@@ -11,9 +8,15 @@ import com.app.bridgeQuality.entity.enums.BridgeStatus;
 import com.app.bridgeQuality.repository.BridgeHealthLogRepository;
 import com.app.bridgeQuality.repository.BridgeRepository;
 import com.app.bridgeQuality.repository.MLOutputLogRepository;
+import jakarta.persistence.EntityNotFoundException;
 import lombok.AllArgsConstructor;
+import org.jetbrains.annotations.Contract;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.stereotype.Service;
+
+import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
 @AllArgsConstructor
@@ -73,7 +76,8 @@ public class BridgeHealthService {
         return responseDTO;
     }
 
-    private String mapHealthStateToBridgeStatus(String healthState) {
+    @Contract(pure = true)
+    private @NotNull String mapHealthStateToBridgeStatus(String healthState) {
         if (healthState == null) return "FAIR";
 
         return switch (healthState.toUpperCase()) {
@@ -84,5 +88,56 @@ public class BridgeHealthService {
             case "CRITICAL" -> "CRITICAL";
             default -> "FAIR"; // fallback
         };
+    }
+
+    public List<SensorLogResponse> getAllSensorLogs() {
+        return bridgeHealthLogRepository.findAll()
+                .stream()
+                .map(this::mapToSensorLogDto)
+                .toList();
+    }
+
+    public Optional<SensorLogResponse> getSensorLogById(UUID id) {
+        BridgeHealthLog log = bridgeHealthLogRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Sensor log not found with id: " + id));
+
+        return Optional.of(mapToSensorLogDto(log));
+    }
+
+    private SensorLogResponse mapToSensorLogDto(BridgeHealthLog entity) {
+        SensorLogResponse dto = new SensorLogResponse();
+        dto.setId(entity.getId());
+        dto.setBridgeId(entity.getBridgeId().getId());
+        dto.setStrainMicrostrain(entity.getStrainMicrostrain());
+        dto.setVibrationMs2(entity.getVibrationMs2());
+        dto.setTemperatureC(entity.getTemperatureC());
+        dto.setHumidityPercent(entity.getHumidityPercent());
+        dto.setCreatedAt(entity.getCreatedAt());
+        return dto;
+    }
+
+    public List<MlLogResponse> getAllMlLogs() {
+        return mlOutputLogRepository.findAll()
+                .stream()
+                .map(this::mapToMlLogDto)
+                .toList();
+    }
+
+    public Optional<MlLogResponse> getMlLogById(UUID id) {
+        MLOutputLog log = mlOutputLogRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Sensor log not found with id: " + id));
+
+        return Optional.of(mapToMlLogDto(log));
+    }
+
+    private MlLogResponse mapToMlLogDto(MLOutputLog entity) {
+        MlLogResponse dto = new MlLogResponse();
+        dto.setId(entity.getId());
+        dto.setBridgeLogRef(entity.getBridgeLogRef().getId());
+        dto.setHealthIndex(entity.getHealthIndex());
+        dto.setHealthState(entity.getHealthState());
+        dto.setRecommendedAction(entity.getRecommendedAction());
+        dto.setCreatedAt(entity.getCreatedAt());
+        return dto;
     }
 }

@@ -2,10 +2,8 @@ package com.app.bridgeQuality.controller;
 
 import com.app.bridgeQuality.dto.BridgeHealthLogRequestDTO;
 import com.app.bridgeQuality.dto.BridgeHealthLogResponseDTO;
-import com.app.bridgeQuality.entity.BridgeHealthLog;
-import com.app.bridgeQuality.entity.MLOutputLog;
-import com.app.bridgeQuality.repository.BridgeHealthLogRepository;
-import com.app.bridgeQuality.repository.MLOutputLogRepository;
+import com.app.bridgeQuality.dto.MlLogResponse;
+import com.app.bridgeQuality.dto.SensorLogResponse;
 import com.app.bridgeQuality.service.BridgeHealthService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -19,9 +17,6 @@ import java.util.UUID;
 @RequestMapping("/api/bridgeHealth")
 @RequiredArgsConstructor
 public class HealthLogController {
-
-    private final BridgeHealthLogRepository bridgeHealthLogRepository;
-    private final MLOutputLogRepository mlOutputLogRepository;
     private final BridgeHealthService bridgeHealthService;
 
     @PostMapping("/ingest")
@@ -36,14 +31,18 @@ public class HealthLogController {
     }
 
     @GetMapping("/sensorLog")
-    public List<BridgeHealthLog> getAllSensorLog() { return bridgeHealthLogRepository.findAll(); }
+    public List<SensorLogResponse> getAllSensorLog() {
+        return bridgeHealthService.getAllSensorLogs();
+    }
 
     @GetMapping("/sensorLog/{id}")
-    public Optional<BridgeHealthLog> getSensorLogById(@PathVariable UUID id) { return bridgeHealthLogRepository.findById(id); }
+    public Optional<SensorLogResponse> getSensorLogById(@PathVariable UUID id) {
+        return bridgeHealthService.getSensorLogById(id);
+    }
 
     @GetMapping("/mlLog")
-    public List<MLOutputLog> getAllMLOutputLog() { return mlOutputLogRepository.findAll(); }
+    public List<MlLogResponse> getAllMLOutputLog() { return bridgeHealthService.getAllMlLogs(); }
 
     @GetMapping("/mlLog/{id}")
-    public Optional<MLOutputLog> getMLOutputLogById(@PathVariable UUID id) { return mlOutputLogRepository.findById(id); }
+    public Optional<MlLogResponse> getMLOutputLogById(@PathVariable UUID id) { return bridgeHealthService.getMlLogById(id); }
 }
