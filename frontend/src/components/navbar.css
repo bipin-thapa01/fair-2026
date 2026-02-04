@@ -1,0 +1,100 @@
+.nav{
+  --nav-h:64px;
+  height:var(--nav-h);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:10px 24px;
+  box-sizing:border-box;
+  background:linear-gradient(180deg,#ECF9F0,#F7FFF5);
+  border-bottom:1px solid var(--border-gray);
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  z-index:50;
+}
+.nav-left{display:flex;align-items:center}
+.logo-img{width:64px;height:64px;margin-right:12px}
+.brand-text{font-weight:800;color:var(--primary)}
+.nav-right{display:flex;align-items:center;gap:18px;margin-left:auto}
+.nav-link{position:relative; color:var(--text-dark); text-decoration:none; padding:8px 6px; font-weight:600}
+
+.brand-text { font-weight:700; color:var(--primary); top: -17px; position: relative; }
+
+/* underline fill-up effect using pseudo element */
+.nav{
+  --nav-h:64px;
+  height:var(--nav-h);
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding:10px 24px;
+  background:linear-gradient(90deg,#ffffff, #f6f9ff);
+  border-bottom:1px solid #e6eef8;
+  position:fixed;
+  top:0;
+  left:0;
+  width:100%;
+  z-index:50;
+}
+.nav-left{display:flex;align-items:center}
+.logo-img{width:52px;height:52px;margin-right:12px}
+.brand-text{font-weight:700;color:var(--primary)}
+.nav-right{display:flex;align-items:center;gap:18px}
+.nav-link{position:relative; color:var(--text-dark); text-decoration:none; padding:8px 6px; font-weight:600}
+
+/* underline fill-up effect using pseudo element */
+.nav-link::after{
+  content:'';
+  position:absolute;
+  left:0;right:0;bottom:2px;height:3px;
+  background:linear-gradient(90deg,var(--accent),var(--primary));
+  transform-origin:left center;
+  transform:scaleX(0);
+  transition:transform .36s cubic-bezier(.2,.9,.2,1);
+  border-radius:3px;
+}
+.nav-link:hover::after{transform:scaleX(1)}
+.nav-link:hover{color:var(--primary)}
+.link-like{margin-left:12px; background:none; border:none; color:var(--text-dark); cursor:pointer}
+.login-btn{background:#0F766E;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;font-weight:700;border:none}
+.login-btn:hover{filter:brightness(1.05);opacity:0.97}
+.hero-login{background:#0F766E;color:#fff;padding:8px 12px;border-radius:8px;text-decoration:none;font-weight:700;border:none}
+.hero-login:hover{filter:brightness(1.03)}
+.login-btn::after{display:none}
+.user-info{display:flex;gap:8px;align-items:center}
+
+/* hamburger animation */
+.mobile-toggle{display:none;border:none;background:transparent}
+.hamburger{display:inline-block;width:22px;height:16px;position:relative}
+.hamburger::before,.hamburger::after,.hamburger div{content:'';position:absolute;left:0;right:0;height:2px;background:var(--text-dark);border-radius:2px;transition:transform .25s,opacity .2s,top .25s}
+.hamburger::before{top:0}
+.hamburger div{top:7px}
+.hamburger::after{bottom:0}
+.hamburger.open::before{transform:translateY(7px) rotate(45deg)}
+.hamburger.open div{opacity:0}
+.hamburger.open::after{transform:translateY(-7px) rotate(-45deg)}
+
+/* hover animation for hamburger: subtle sliding */
+.mobile-toggle:hover .hamburger::before{transform:translateY(3px) scaleX(1.05)}
+.mobile-toggle:hover .hamburger div{transform:translateX(3px)}
+.mobile-toggle:hover .hamburger::after{transform:translateY(-3px) scaleX(0.95)}
+
+/* Logout button styling used in header */
+.logout-btn{
+  display:inline-flex;align-items:center;gap:8px;padding:8px;border-radius:8px;border:1px solid rgba(255,255,255,0.12);background:transparent;color:var(--text-dark);cursor:pointer;text-decoration:none;font-weight:700
+}
+.logout-btn:hover{background:rgba(255,255,255,0.04);transform:translateY(-2px);transition:all .18s}
+
+@media(max-width:920px){
+  .nav-right{gap:12px}
+}
+
+.nav-right{align-items:center}
+
+@media(max-width:720px){
+  .mobile-toggle{display:block}
+  .nav-right{display:flex;flex-direction:column;position:absolute;right:12px;top:64px;background:var(--bg-light);color:var(--text-dark);padding:12px;border-radius:8px;box-shadow:0 8px 24px rgba(8,38,70,0.12);overflow:hidden;max-height:0;transition:max-height .36s ease,opacity .28s ease;opacity:0}
+  .nav-right.open{max-height:360px;opacity:1}
+}

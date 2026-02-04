@@ -1,0 +1,41 @@
+/* Styles for UserLayout header and layout */
+:root{
+  --primary: #14532D;
+  --accent: #0F766E;
+  --bg-light: #F7F9F7;
+  --border-gray: #D1D5DB;
+  --text-dark: #1C1917;
+}
+
+/* layout container handled in the component; this file styles the header and logout */
+.logout-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border-radius:8px;
+  border:1px solid rgba(0,0,0,0.06);
+  background:linear-gradient(90deg,var(--primary),var(--accent));
+  color:#fff;
+  cursor:pointer;
+  font-weight:700;
+}
+
+.logout-btn:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(12,45,28,0.08)}
+
+/* ensure main uses the app spacing */
+main{padding:18px}
+
+/* make the page-mounted transition consistent */
+.page-mounted{opacity:1;transform:none}
+.page-init{opacity:0;transform:translateY(6px)}
+
+/* small responsive tweak */
+@media(max-width:800px){
+  .logout-btn{padding:6px 8px}
+}
+
+/* header title responsive */
+@media(max-width:720px){
+  div[style*="font-size:18"]{font-size:16px}
+}
