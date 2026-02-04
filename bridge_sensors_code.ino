@@ -75,8 +75,6 @@ void setup() {
 }
 
 void loop() {
-  delay(30000);
-
   // Read accelerometer
   sensors_event_t a, g, temp;
   mpu.getEvent(&a, &g, &temp);
@@ -86,10 +84,13 @@ void loop() {
   z_acc = a.acceleration.z;
 
   vibration_ms2 = sqrt(x_acc*x_acc + y_acc*y_acc + z_acc*z_acc);
+  float normalizedVibration_ms2 = vibration_ms2/12;
 
   // Read DHT11
   float humidity = dht.readHumidity();
+  float normalizedHumidity = humidity/100;
   float temperature = dht.readTemperature() - 10;
+  float normalizedTemperature = temperature/50;
 
   if(isnan(humidity) || isnan(temperature)){
     Serial.println("Failed to read data from DHT11!");
@@ -122,9 +123,9 @@ void loop() {
 
     String jsonData = "{";
     jsonData += "\"bridgeId\": \"BRIDGE-001\",";
-    jsonData += "\"vibration\": " + String(vibration_ms2, 2) + ",";
-    jsonData += "\"temperature\": " + String(temperature, 2) + ",";
-    jsonData += "\"humidity\": " + String(humidity, 2) + ",";
+    jsonData += "\"vibration\": " + String(normalizedVibration_ms2, 2) + ",";
+    jsonData += "\"temperature\": " + String(normalizedTemperature, 2) + ",";
+    jsonData += "\"humidity\": " + String(normalizedHumidity, 2) + ",";
     jsonData += "\"Strain_microstrain\": " + String(normalizedStrain, 2);
     jsonData += "}";
 
@@ -138,7 +139,5 @@ void loop() {
   } else {
     Serial.println("HX711 not found.");
   }
-
-  Serial.println(strainMicrostrain);
-
+  delay(30000);
 }
