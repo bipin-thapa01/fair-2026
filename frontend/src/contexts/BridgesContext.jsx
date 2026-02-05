@@ -97,21 +97,18 @@ export function BridgesProvider({ children }) {
 
   const addBridge = async (payload) => {
     try {
-      // New bridges start with BQI 100
-      const bridgeData = {
-        ...payload,
-        bqi: 100,
-        status: 'EXCELLENT'
-      };
-      
+      // POST only name, latitude, longitude — backend manages bqi/status
       let result;
       if (apiStatus === 'fallback') {
+        // Create a local fallback bridge object
         result = {
           id: `BRIDGE-${String(Date.now()).slice(-6)}`,
-          ...bridgeData
+          ...payload,
+          bqi: 100,
+          status: 'EXCELLENT'
         };
       } else {
-        result = await api.addBridge(bridgeData);
+        result = await api.addBridge(payload);
       }
       
       await fetchBridges();

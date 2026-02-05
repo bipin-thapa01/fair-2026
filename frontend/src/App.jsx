@@ -22,8 +22,7 @@ import api from './lib/api'
 import Footer from './components/Footer'
 import HealthLogs from './pages/admin/HealthLogs';
 
-// Import BQI utilities
-import { calculateBQIFromSensors, getStatusFromBQI } from './lib/bqiCalculator'
+// BQI calculator removed — rely on API-provided bqi/status
 
 function App() {
   const [bridges, setBridges] = useState([])
@@ -100,11 +99,9 @@ function App() {
     ]
   }
 
-  // Helper function for default BQI calculation
+  // Default BQI fallback (should rarely be used; prefer API values)
   const calculateDefaultBQI = (bridgeId) => {
-    // Generate consistent BQI based on bridge ID
     const hash = bridgeId.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0)
-    // Return BQI between 40-100
     return (hash % 61) + 40
   }
 
@@ -138,75 +135,9 @@ function App() {
         if (!mounted) return
         
         if (apiBridges && apiBridges.length > 0) {
-          // 2. For each bridge, calculate or load health data
-          const enhancedBridges = await Promise.all(
-            apiBridges.map(async (bridge) => {
-              // Check if we have existing health data in localStorage
-              const existingHealth = bridgeHealth[bridge.id]
-              
-              if (existingHealth && existingHealth.bqi !== undefined) {
-                // Use existing health data
-                return {
-                  ...bridge,
-                  bqi: existingHealth.bqi,
-                  status: existingHealth.status || bridge.status || 'EXCELLENT',
-                  updatedAt: existingHealth.updatedAt
-                }
-              } else {
-                // Calculate new health data
-                let bqi, status
-                
-                try {
-                  // Try to get sensor data for BQI calculation
-                  const sensorLogs = await api.getSensorLogs(bridge.id)
-                  
-                  if (sensorLogs && sensorLogs.length > 0) {
-                    // Calculate BQI from latest sensor data
-                    const latestLog = sensorLogs.sort((a, b) => 
-                      new Date(b.createdAt) - new Date(a.createdAt)
-                    )[0]
-                    
-                    bqi = calculateBQIFromSensors({
-                      strainMicrostrain: latestLog.strainMicrostrain || 0,
-                      vibrationMs2: latestLog.vibrationMs2 || 0,
-                      temperatureC: latestLog.temperatureC || 20
-                    })
-                    status = getStatusFromBQI(bqi)
-                  } else {
-                    // No sensor data - use default or calculate based on bridge ID
-                    bqi = calculateDefaultBQI(bridge.id)
-                    status = getStatusFromBQI(bqi)
-                  }
-                } catch (sensorError) {
-                  console.warn(`No sensor data for bridge ${bridge.id}:`, sensorError.message)
-                  bqi = calculateDefaultBQI(bridge.id)
-                  status = getStatusFromBQI(bqi)
-                }
-                
-                // Save health data locally
-                const healthData = {
-                  bqi,
-                  status,
-                  updatedAt: new Date().toISOString(),
-                  hasSensorData: false
-                }
-                
-                // Update local storage
-                const newHealth = { ...bridgeHealth, [bridge.id]: healthData }
-                setBridgeHealth(newHealth)
-                localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
-                
-                return {
-                  ...bridge,
-                  bqi,
-                  status,
-                  updatedAt: healthData.updatedAt
-                }
-              }
-            })
-          )
-          
-          setBridges(enhancedBridges)
+          // Use API-provided bridges directly (bqi/status should come from API)
+          setBridges(apiBridges)
+          setApiConnected(true)
         } else {
           // No bridges from API, use fallback
           console.warn('No bridges from API, using fallback bridges')
@@ -233,87 +164,25 @@ function App() {
   }, [])
 
   // Calculate BQI for a specific bridge
+  // Fetch latest bridge health (bqi/status) from API for a specific bridge
   const calculateBridgeBQI = async (bridgeId) => {
     try {
-      // Try to get sensor data
-      const sensorLogs = await api.getSensorLogs(bridgeId)
-      
-      let bqi, status
-      
-      if (sensorLogs && sensorLogs.length > 0) {
-        // Calculate BQI from latest sensor data
-        const latestLog = sensorLogs.sort((a, b) => 
-          new Date(b.createdAt) - new Date(a.createdAt)
-        )[0]
-        
-        bqi = calculateBQIFromSensors({
-          strainMicrostrain: latestLog.strainMicrostrain || 0,
-          vibrationMs2: latestLog.vibrationMs2 || 0,
-          temperatureC: latestLog.temperatureC || 20
-        })
-        status = getStatusFromBQI(bqi)
-      } else {
-        // No sensor data - check existing or use default
-        const existingHealth = bridgeHealth[bridgeId]
-        if (existingHealth && existingHealth.bqi) {
-          bqi = existingHealth.bqi
-          status = existingHealth.status
-        } else {
-          bqi = calculateDefaultBQI(bridgeId)
-          status = getStatusFromBQI(bqi)
-        }
-      }
-      
-      // Update health data
-      const healthData = {
-        bqi,
-        status,
-        updatedAt: new Date().toISOString(),
-        hasSensorData: !!(sensorLogs && sensorLogs.length > 0)
-      }
-      
-      const newHealth = { ...bridgeHealth, [bridgeId]: healthData }
-      setBridgeHealth(newHealth)
-      localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
-      
+      const data = await api.getBridge(bridgeId)
+      const bqi = data?.bqi ?? null
+      const status = data?.status ?? null
+
       // Update bridge in state
-      setBridges(prev => prev.map(bridge => 
-        bridge.id === bridgeId 
-          ? { ...bridge, bqi, status, updatedAt: healthData.updatedAt }
-          : bridge
-      ))
-      
+      setBridges(prev => prev.map(bridge => bridge.id === bridgeId ? { ...bridge, ...(data || {}) } : bridge))
+
       // Trigger UI updates
       window.dispatchEvent(new CustomEvent('bqi-health-updated', {
         detail: { bridgeId, bqi, status }
       }))
-      
-      return healthData
+
+      return { bqi, status }
     } catch (error) {
-      console.error(`Error calculating BQI for bridge ${bridgeId}:`, error)
-      
-      // Fallback to default BQI
-      const bqi = calculateDefaultBQI(bridgeId)
-      const status = getStatusFromBQI(bqi)
-      const healthData = {
-        bqi,
-        status,
-        updatedAt: new Date().toISOString(),
-        hasSensorData: false,
-        error: true
-      }
-      
-      const newHealth = { ...bridgeHealth, [bridgeId]: healthData }
-      setBridgeHealth(newHealth)
-      localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
-      
-      setBridges(prev => prev.map(bridge => 
-        bridge.id === bridgeId 
-          ? { ...bridge, bqi, status, updatedAt: healthData.updatedAt }
-          : bridge
-      ))
-      
-      return healthData
+      console.error(`Error fetching bridge health for ${bridgeId}:`, error)
+      return null
     }
   }
 
@@ -321,15 +190,10 @@ function App() {
   const addBridge = async (b) => {
     try {
       // New bridges start with default BQI
-      const bqi = 100 // Start with perfect score
-      const status = 'EXCELLENT'
-      
       const payload = { 
         name: b.name, 
         latitude: parseFloat(b.latitude ?? b.lat ?? b.latitude), 
-        longitude: parseFloat(b.longitude ?? b.lng ?? b.longitude),
-        bqi: bqi,
-        status: status
+        longitude: parseFloat(b.longitude ?? b.lng ?? b.longitude)
       }
       
       let result
@@ -343,29 +207,14 @@ function App() {
         setBridges(prev => [result, ...prev])
       } else {
         result = await api.addBridge(payload)
-        // Reload bridges to get the new one with ID
+        // Reload bridges to get the new one with ID (API should include bqi/status)
         const data = await api.getBridges()
-        if (Array.isArray(data)) {
-          const enhancedData = data.map(bridge => {
-            if (!bridge.bqi) {
-              return { ...bridge, bqi: calculateDefaultBQI(bridge.id), status: getStatusFromBQI(calculateDefaultBQI(bridge.id)) }
-            }
-            return bridge
-          })
-          setBridges(enhancedData)
-        }
+        if (Array.isArray(data)) setBridges(data)
       }
       
-      // Save health data
-      const healthData = {
-        bqi,
-        status,
-        updatedAt: new Date().toISOString(),
-        hasSensorData: false
-      }
-      const newHealth = { ...bridgeHealth, [result.id]: healthData }
+      // No local BQI calculation — backend manages health data. Keep bridgeHealth minimal.
+      const newHealth = { ...bridgeHealth }
       setBridgeHealth(newHealth)
-      localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
       
       // Trigger updates
       window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
@@ -405,112 +254,33 @@ function App() {
 
   // Update a bridge
   const updateBridge = async (id, updates) => {
-    // Check if BQI needs recalculation
-    const shouldRecalcBQI = updates.strainMicrostrain !== undefined || 
-                           updates.vibrationMs2 !== undefined ||
-                           updates.temperatureC !== undefined
-    
-    let finalUpdates = updates
-    
-    if (shouldRecalcBQI) {
-      // Recalculate BQI
-      const bqi = calculateBQIFromSensors({
-        strainMicrostrain: updates.strainMicrostrain || 0,
-        vibrationMs2: updates.vibrationMs2 || 0,
-        temperatureC: updates.temperatureC || 20
-      })
-      const status = getStatusFromBQI(bqi)
-      
-      finalUpdates = {
-        ...updates,
-        bqi,
-        status
-      }
-    }
-    
-    // Map frontend keys to backend parameter names
-    const payload = {
-      name: finalUpdates.name,
-      latitude: parseFloat(finalUpdates.latitude ?? finalUpdates.lat),
-      longitude: parseFloat(finalUpdates.longitude ?? finalUpdates.lng),
-      status: finalUpdates.status,
-      bqi: finalUpdates.bqi,
-      description: finalUpdates.description
-    }
+    // Do not calculate BQI locally anymore. Send only the fields that changed
+    const payload = {}
+    if (updates.name !== undefined) payload.name = updates.name
+    if (updates.latitude !== undefined || updates.lat !== undefined) payload.latitude = parseFloat(updates.latitude ?? updates.lat)
+    if (updates.longitude !== undefined || updates.lng !== undefined) payload.longitude = parseFloat(updates.longitude ?? updates.lng)
+    if (updates.description !== undefined) payload.description = updates.description
 
     try {
       if (!apiConnected) {
-        // Local update
-        const mapped = { 
-          name: finalUpdates.name, 
-          latitude: parseFloat(finalUpdates.latitude ?? finalUpdates.lat), 
-          longitude: parseFloat(finalUpdates.longitude ?? finalUpdates.lng), 
-          status: finalUpdates.status || 'EXCELLENT',
-          bqi: finalUpdates.bqi || calculateDefaultBQI(id),
-          updatedAt: new Date().toISOString()
-        }
-        
+        // Local update: merge changes but do not (re)calculate BQI locally
+        const mapped = { updatedAt: new Date().toISOString() }
+        if (payload.name !== undefined) mapped.name = payload.name
+        if (payload.latitude !== undefined) mapped.latitude = payload.latitude
+        if (payload.longitude !== undefined) mapped.longitude = payload.longitude
+
         setBridges((s) => s.map(b => b.id === id ? { ...b, ...mapped } : b))
-        
-        // Update health data
-        const healthData = {
-          bqi: mapped.bqi,
-          status: mapped.status,
-          updatedAt: mapped.updatedAt,
-          hasSensorData: shouldRecalcBQI
-        }
-        const newHealth = { ...bridgeHealth, [id]: healthData }
-        setBridgeHealth(newHealth)
-        localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
-        
-        // Trigger UI updates
-        window.dispatchEvent(new CustomEvent('bqi-health-updated', {
-          detail: { bridgeId: id, bqi: healthData.bqi, status: healthData.status }
-        }))
-        
+
         window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
-        
         return { id, ...mapped }
       } else {
         await api.updateBridge(id, payload)
-        
-        // Reload bridges
+
+        // Reload bridges from API (API should include bqi/status)
         const data = await api.getBridges()
-        if (Array.isArray(data)) {
-          // Enhance with BQI if missing
-          const enhancedData = data.map(bridge => {
-            if (!bridge.bqi) {
-              // Check if we have health data for this bridge
-              const health = bridgeHealth[bridge.id]
-              return health 
-                ? { ...bridge, bqi: health.bqi, status: health.status }
-                : { ...bridge, bqi: calculateDefaultBQI(bridge.id), status: getStatusFromBQI(calculateDefaultBQI(bridge.id)) }
-            }
-            return bridge
-          })
-          setBridges(enhancedData)
-        }
-        
-        // Update health data if BQI was recalculated
-        if (shouldRecalcBQI) {
-          const healthData = {
-            bqi: finalUpdates.bqi,
-            status: finalUpdates.status,
-            updatedAt: new Date().toISOString(),
-            hasSensorData: true
-          }
-          const newHealth = { ...bridgeHealth, [id]: healthData }
-          setBridgeHealth(newHealth)
-          localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
-          
-          // Trigger UI updates
-          window.dispatchEvent(new CustomEvent('bqi-health-updated', {
-            detail: { bridgeId: id, bqi: finalUpdates.bqi, status: finalUpdates.status }
-          }))
-        }
-        
+        if (Array.isArray(data)) setBridges(data)
+
         window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
-        
         return
       }
     } catch (e) {
@@ -584,15 +354,24 @@ function App() {
 
   // Manually update BQI (for admin/testing)
   const updateBridgeBQI = async (bridgeId, bqi) => {
-    const status = getStatusFromBQI(bqi)
-    
-    // Update local state
+    // Simple status mapping from numeric BQI (used only for manual overrides)
+    const statusFromBqi = (val) => {
+      if (val >= 80) return 'EXCELLENT'
+      if (val >= 60) return 'GOOD'
+      if (val >= 40) return 'FAIR'
+      if (val >= 20) return 'POOR'
+      return 'CRITICAL'
+    }
+
+    const status = statusFromBqi(bqi)
+
+    // Update local state (optimistic)
     setBridges(prev => prev.map(bridge => 
       bridge.id === bridgeId 
         ? { ...bridge, bqi, status, updatedAt: new Date().toISOString() }
         : bridge
     ))
-    
+
     // Update health data
     const healthData = {
       bqi,
@@ -601,12 +380,12 @@ function App() {
       hasSensorData: false,
       manualUpdate: true
     }
-    
+
     const newHealth = { ...bridgeHealth, [bridgeId]: healthData }
     setBridgeHealth(newHealth)
     localStorage.setItem('bqi_health_data', JSON.stringify(newHealth))
-    
-    // Try to update on server
+
+    // Try to update on server (server side will accept manual override if supported)
     if (apiConnected) {
       try {
         await api.updateBridge(bridgeId, { bqi, status })
@@ -614,14 +393,14 @@ function App() {
         console.warn('Could not update BQI on server:', error)
       }
     }
-    
+
     // Trigger UI updates
     window.dispatchEvent(new CustomEvent('bqi-health-updated', {
       detail: { bridgeId, bqi, status }
     }))
-    
+
     window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
-    
+
     return healthData
   }
 
@@ -640,19 +419,19 @@ function App() {
       }
       
       if (data && data.length > 0) {
-        // Recalculate BQI for all bridges
+        // Fetch latest health for all bridges from API (do not calculate locally)
         const enhancedBridges = await Promise.all(
           data.map(async (bridge) => {
             const health = await calculateBridgeBQI(bridge.id)
             return {
               ...bridge,
-              bqi: health?.bqi || calculateDefaultBQI(bridge.id),
-              status: health?.status || getStatusFromBQI(calculateDefaultBQI(bridge.id)),
-              updatedAt: health?.updatedAt || new Date().toISOString()
+              bqi: health?.bqi ?? bridge.bqi,
+              status: health?.status ?? bridge.status,
+              updatedAt: health?.updatedAt ?? bridge.updatedAt
             }
           })
         )
-        
+
         setBridges(enhancedBridges)
       }
     } catch (error) {

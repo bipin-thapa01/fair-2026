@@ -7,10 +7,11 @@ import 'leaflet.markercluster'
 import { BridgesContext } from '../contexts/BridgesContext'
 import { useNavigate } from 'react-router-dom'
 
+import api from '../lib/api'
 
 
-// Import BQI utilities
-import { getColorForBQI, getStatusFromBQI } from '../lib/bqiCalculator'
+
+// NOTE: BQI calculator is deprecated. Use API-provided `bqi` and `status` fields.
 
 // Helper function to lighten hex color
 function lighten(hex, amt) {
@@ -50,22 +51,34 @@ const normalizeLatLng = (src) => {
   }
 }
 
-// Get BQI score from bridge data (prioritizes bridge.bqi, falls back to status)
+// Prefer API-provided BQI and status. Do not calculate locally.
 const getBQIFromBridge = (bridge) => {
-  // If bridge has bqi field, use it
-  if (bridge.bqi !== undefined && bridge.bqi !== null) {
-    return bridge.bqi;
+  if (bridge == null) return null
+  return bridge.bqi !== undefined && bridge.bqi !== null ? Number(bridge.bqi) : null
+}
+
+// Map status text to colors (used for marker styling)
+const getColorForStatus = (status) => {
+  const s = (status || '').toString().toUpperCase()
+  switch (s) {
+    case 'EXCELLENT': return '#10B981'
+    case 'GOOD': return '#22C55E'
+    case 'FAIR': return '#F59E0B'
+    case 'POOR': return '#EF4444'
+    case 'CRITICAL': return '#DC2626'
+    default: return '#64748B'
   }
-  
-  // Fallback to status-based BQI
-  const statusStr = (bridge.status || '').toString().toUpperCase();
-  if (statusStr === 'EXCELLENT') return 90;
-  if (statusStr === 'GOOD') return 75;
-  if (statusStr === 'FAIR') return 55;
-  if (statusStr === 'POOR') return 35;
-  if (statusStr === 'CRITICAL') return 10;
-  return 60;
-};
+}
+
+// Also provide a numeric-to-color fallback when only numeric BQI is available
+const getColorForNumericBQI = (bqi) => {
+  if (bqi === null || bqi === undefined || isNaN(bqi)) return '#64748B'
+  if (bqi >= 80) return '#10B981'
+  if (bqi >= 70) return '#22C55E'
+  if (bqi >= 60) return '#F59E0B'
+  if (bqi >= 50) return '#EF4444'
+  return '#DC2626'
+}
 
 // Toast component for notifications
 function Toast({ msg }) {
@@ -105,6 +118,7 @@ export default function LeafletMap() {
   const [visibleBridgesCount, setVisibleBridgesCount] = useState(0)
   const [lastUpdateTime, setLastUpdateTime] = useState(null)
   const [toasts, setToasts] = useState([])
+  const [detailsCache, setDetailsCache] = useState({})
   const [formData, setFormData] = useState({
     bridgeId: '',
     title: '',
@@ -125,7 +139,7 @@ export default function LeafletMap() {
   // Function to create marker icon based on BQI
   const makeIcon = (bridge) => {
     const bqi = getBQIFromBridge(bridge)
-    const color = getColorForBQI(bqi)
+    const color = getColorForNumericBQI(bqi) || getColorForStatus(bridge.status)
     
     const light = lighten(color, 0.35)
     const shadow1 = hexToRgba(color, 0.55)
@@ -160,7 +174,7 @@ export default function LeafletMap() {
   const createPopupContent = (b) => {
     const n = normalizeLatLng(b)
     const bqi = getBQIFromBridge(b)
-    const status = getStatusFromBQI(bqi)
+    const status = b.status || 'UNKNOWN'
     const lat = n.latitude
     const lng = n.longitude
 
@@ -181,20 +195,20 @@ export default function LeafletMap() {
             <div style="font-size:14px;color:#444">
               <strong>BQI Score:</strong>
             </div>
-            <div style="
+              <div style="
               font-size:18px;
               font-weight:700;
-              color:${getColorForBQI(bqi)};
-              background:${getColorForBQI(bqi)}20;
+              color:${getColorForNumericBQI(bqi)};
+              background:${getColorForNumericBQI(bqi)}20;
               padding:4px 12px;
               border-radius:20px;
-              border: 2px solid ${getColorForBQI(bqi)}40;
+              border: 2px solid ${getColorForNumericBQI(bqi)}40;
             ">
-              ${bqi}/100
+              ${bqi !== null && bqi !== undefined ? bqi + '/100' : '—'}
             </div>
           </div>
           <div style="font-size:13px;color:#666">
-            <strong>Status:</strong> <span style="color:${getColorForBQI(bqi)};font-weight:500">${status}</span>
+            <strong>Status:</strong> <span style="color:${getColorForStatus(status)};font-weight:500">${status}</span>
           </div>
           ${lastUpdateText ? `<div style="font-size:11px;color:#888;margin-top:4px">${lastUpdateText}</div>` : ''}
         </div>
@@ -238,10 +252,11 @@ export default function LeafletMap() {
         return false
       }
       
-      // Status filter
+      // Status filter - use API-provided status
+      // Prefer detailsCache status when available
+      const mergedStatus = (detailsCache[b.id] && detailsCache[b.id].status) || b.status || ''
       if (statusFilter !== 'all') {
-        const bridgeStatus = getStatusFromBQI(getBQIFromBridge(b)).toLowerCase()
-        return bridgeStatus === statusFilter.toLowerCase()
+        return mergedStatus.toLowerCase() === statusFilter.toLowerCase()
       }
       
       return true
@@ -250,8 +265,11 @@ export default function LeafletMap() {
     let validBridgesCount = 0
     
     filteredBridges.forEach(b => {
+      // Merge API-fetched details when available
+      const merged = { ...(b || {}), ...(detailsCache[b.id] || {}) }
+
       // Use normalized coordinates (swap longitude/latitude)
-      const n = normalizeLatLng(b)
+      const n = normalizeLatLng(merged)
       let lat = n.latitude
       let lng = n.longitude
       
@@ -280,10 +298,10 @@ export default function LeafletMap() {
       }
       
       validBridgesCount++
-      const icon = makeIcon(b)
-      const marker = L.marker([lat, lng], { icon, title: b.name })
+      const icon = makeIcon(merged)
+      const marker = L.marker([lat, lng], { icon, title: merged.name })
 
-      marker.bindPopup(createPopupContent(b))
+      marker.bindPopup(createPopupContent(merged))
 
       // Handle popup events
       marker.on('popupopen', (e) => {
@@ -299,7 +317,7 @@ export default function LeafletMap() {
             }
 
             if (mapRef.current) mapRef.current.closePopup()
-            setSelectedBridge(b)
+            setSelectedBridge(merged)
             setShowReportForm(true)
           }
         }
@@ -385,10 +403,13 @@ export default function LeafletMap() {
         const bqis = childMarkers.map(marker => {
           const bridgeName = marker.options.title
           const bridge = bridges.find(b => b.name === bridgeName)
-          return bridge ? getBQIFromBridge(bridge) : 60
-        })
-        const avgBqi = Math.round(bqis.reduce((a, b) => a + b, 0) / bqis.length)
-        const color = getColorForBQI(avgBqi)
+          const id = bridge?.id
+          const det = id ? detailsCache[id] : null
+          const val = det && det.bqi !== undefined && det.bqi !== null ? Number(det.bqi) : (bridge && bridge.bqi !== undefined && bridge.bqi !== null ? Number(bridge.bqi) : null)
+          return val
+        }).filter(x => x !== null)
+        const avgBqi = bqis.length ? Math.round(bqis.reduce((a, b) => a + b, 0) / bqis.length) : null
+        const color = avgBqi !== null ? getColorForNumericBQI(avgBqi) : '#64748B'
         const lightColor = lighten(color, 0.4)
         
         // Determine size based on count
@@ -509,6 +530,32 @@ export default function LeafletMap() {
       window.removeEventListener('bqi-bridges-updated', handleBridgesUpdated)
     }
   }, [refreshBridges])
+
+  // Fetch per-bridge details (bqi/status) and cache them to avoid recalculating
+  useEffect(() => {
+    let mounted = true
+    const ids = (bridges || []).map(b => b.id).filter(Boolean)
+    const missing = ids.filter(id => !detailsCache[id])
+    if (missing.length === 0) return
+
+    const fetchDetails = async () => {
+      try {
+        const promises = missing.map(id => api.getBridge(id).then(d => ({ id, d })).catch(() => ({ id, d: null })))
+        const results = await Promise.all(promises)
+        if (!mounted) return
+        setDetailsCache(prev => {
+          const next = { ...prev }
+          results.forEach(r => { if (r.d) next[r.id] = r.d })
+          return next
+        })
+      } catch (e) {
+        console.error('Error fetching bridge details:', e)
+      }
+    }
+
+    fetchDetails()
+    return () => { mounted = false }
+  }, [bridges])
   
   // Persist filters to localStorage
   useEffect(() => {

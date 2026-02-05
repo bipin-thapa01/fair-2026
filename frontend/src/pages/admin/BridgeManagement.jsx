@@ -1,5 +1,6 @@
 import React, { useContext, useState, useEffect } from 'react'
 import { BridgesContext } from '../../contexts/BridgesContext'
+import api from '../../lib/api'
 import Sidebar from '../../components/Sidebar'
 import Topbar from '../../components/Topbar'
 
@@ -49,7 +50,6 @@ function Toast({ msg, type }) {
 }
 
 export default function BridgeManagement() {
-  // Get only needed functions from BridgesContext
   const { 
     bridges, 
     addBridge,
@@ -58,36 +58,11 @@ export default function BridgeManagement() {
     apiConnected
   } = useContext(BridgesContext)
   
-  // Helper to normalize coordinates
-  const normalizeLatLng = (src) => {
-    const aRaw = src?.latitude ?? src?.lat
-    const bRaw = src?.longitude ?? src?.lng
-    const a = aRaw !== undefined && aRaw !== '' ? Number(aRaw) : null
-    const b = bRaw !== undefined && bRaw !== '' ? Number(bRaw) : null
-
-    if (a == null || b == null) return { latitude: a, longitude: b }
-
-    // If latitude value is outside expected Nepal lat range but longitude fits, swap.
-    const latInRange = (val) => val >= 26.3 && val <= 30.5
-    const lngInRange = (val) => val >= 80.0 && val <= 88.3
-
-    if (!latInRange(a) && latInRange(b) && lngInRange(a) && !lngInRange(b)) {
-      return { latitude: b, longitude: a }
-    }
-
-    // If a clearly looks like longitude (>=50) and b looks like latitude (<=50), swap
-    if (Math.abs(a) > 50 && Math.abs(b) <= 50) {
-      return { latitude: b, longitude: a }
-    }
-
-    return { latitude: a, longitude: b }
-  }
-  
   const [form, setForm] = useState({ 
     name: '', 
     latitude: '', 
     longitude: '',
-    status: 'active'
+    status: 'EXCELLENT' // Default status from API options
   })
   const [searchTerm, setSearchTerm] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
@@ -106,7 +81,6 @@ export default function BridgeManagement() {
     if (!form.latitude || isNaN(parseFloat(form.latitude))) return 'Valid latitude is required'
     if (!form.longitude || isNaN(parseFloat(form.longitude))) return 'Valid longitude is required'
     
-    // Nepal coordinate boundaries
     const lat = parseFloat(form.latitude)
     const lng = parseFloat(form.longitude)
     if (lat < 26.3 || lat > 30.5) return 'Latitude must be within Nepal bounds (26.3° to 30.5°)'
@@ -125,29 +99,25 @@ export default function BridgeManagement() {
     try {
       setLocalLoading(true)
       
-      // Add new bridge using context function
+      // POST only name, latitude, longitude — backend provides bqi/status
       await addBridge({
         name: form.name,
         latitude: parseFloat(form.latitude),
-        longitude: parseFloat(form.longitude),
-        status: form.status
+        longitude: parseFloat(form.longitude)
       })
       setToast({ msg: 'Bridge created successfully', type: 'success' })
       
-      // Reset form
       setForm({ 
         name: '', 
         latitude: '', 
         longitude: '',
-        status: 'active'
+        status: 'EXCELLENT'
       })
       
-      // Refresh bridges list from context
       if (refreshBridges) {
         await refreshBridges()
       }
       
-      // Trigger map update
       window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
       
     } catch (error) {
@@ -161,6 +131,22 @@ export default function BridgeManagement() {
     }
   }
 
+  // Fetch latest per-bridge details (bqi, status) from API by id
+  const [bridgeDetails, setBridgeDetails] = useState({})
+
+  // Get status color based on API status
+  const getStatusColor = (status) => {
+    const statusStr = (status || '').toString().toUpperCase()
+    switch(statusStr) {
+      case 'EXCELLENT': return '#10B981'
+      case 'GOOD': return '#22C55E'
+      case 'FAIR': return '#F59E0B'
+      case 'POOR': return '#EF4444'
+      case 'CRITICAL': return '#DC2626'
+      default: return '#64748B'
+    }
+  }
+
   // Get BQI color based on value
   const getBQIColor = (bqi) => {
     if (bqi === null || bqi === undefined) return '#64748B'
@@ -171,45 +157,65 @@ export default function BridgeManagement() {
     return '#DC2626' // Critical
   }
 
-  // Get status color (now based on API status)
-  const getStatusColor = (status) => {
-    const statusStr = (status || '').toString().toUpperCase()
-    switch(statusStr) {
-      case 'EXCELLENT': return '#10B981'
-      case 'GOOD': return '#22C55E'
-      case 'FAIR': return '#F59E0B'
-      case 'POOR': return '#EF4444'
-      case 'CRITICAL': return '#DC2626'
-      case 'ACTIVE': return '#3B82F6'
-      case 'MAINTENANCE': return '#F59E0B'
-      case 'INACTIVE': return '#64748B'
-      default: return '#64748B'
-    }
+  // Group bridges by ID and get latest (in case of duplicates)
+  const getLatestBridges = () => {
+    const bridgeMap = new Map()
+    
+    bridges.forEach(bridge => {
+      if (bridge.id) {
+        if (!bridgeMap.has(bridge.id)) {
+          bridgeMap.set(bridge.id, bridge)
+        } else {
+          // If we need to handle multiple entries with same ID, keep the latest
+          const existing = bridgeMap.get(bridge.id)
+          bridgeMap.set(bridge.id, bridge) // Simple: keep current one
+        }
+      }
+    })
+    
+    return Array.from(bridgeMap.values())
   }
 
-  // Get BQI status text based on value
-  const getBQIStatusText = (bqi) => {
-    if (bqi === null || bqi === undefined) return 'No BQI Data'
-    if (bqi >= 80) return 'Excellent'
-    if (bqi >= 70) return 'Good'
-    if (bqi >= 60) return 'Fair'
-    if (bqi >= 50) return 'Poor'
-    return 'Critical'
-  }
-
-  const filteredBridges = bridges.filter(bridge => {
+  const latestBridges = getLatestBridges()
+  
+  const filteredBridges = latestBridges.filter(bridge => {
     const matchesSearch = searchTerm === '' || 
       bridge.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       bridge.id?.toLowerCase().includes(searchTerm.toLowerCase())
     
-    const matchesStatus = statusFilter === 'all' || 
-      (bridge.status || '').toString().toLowerCase() === statusFilter.toLowerCase()
+    // Prefer API-fetched status when available
+    const mergedStatus = (bridgeDetails[bridge.id] && bridgeDetails[bridge.id].status) || bridge.status || ''
+    const matchesStatus = statusFilter === 'all' || mergedStatus.toString().toLowerCase() === statusFilter.toLowerCase()
     
     return matchesSearch && matchesStatus
   })
 
-  // Combine loading states
   const isLoading = contextLoading || localLoading
+
+  // Fetch per-bridge details (bqi/status) after latestBridges is available
+  useEffect(() => {
+    let mounted = true
+    const ids = latestBridges.map(b => b.id).filter(Boolean)
+    if (ids.length === 0) return
+
+    const fetchAll = async () => {
+      try {
+        const promises = ids.map(id => api.getBridge(id).then(data => ({ id, data })).catch(() => ({ id, data: null })))
+        const results = await Promise.all(promises)
+        if (!mounted) return
+        setBridgeDetails(prev => {
+          const next = { ...prev }
+          results.forEach(r => { if (r.data) next[r.id] = r.data })
+          return next
+        })
+      } catch (e) {
+        console.error('Failed to fetch bridge details:', e)
+      }
+    }
+
+    fetchAll()
+    return () => { mounted = false }
+  }, [latestBridges])
 
   return (
     <div className="page-full" style={{
@@ -249,7 +255,7 @@ export default function BridgeManagement() {
                 color: '#64748B',
                 fontSize: '14px'
               }}>
-                {isLoading ? 'Loading...' : `Viewing ${bridges.length} bridges`}
+                {isLoading ? 'Loading...' : `Viewing ${latestBridges.length} bridges`}
                 {!apiConnected && (
                   <span style={{ 
                     marginLeft: '8px', 
@@ -264,7 +270,7 @@ export default function BridgeManagement() {
             </div>
             
             <button
-              onClick={() => setForm({ name: '', latitude: '', longitude: '', status: 'active' })}
+              onClick={() => setForm({ name: '', latitude: '', longitude: '', status: 'EXCELLENT' })}
               disabled={isLoading}
               style={{
                 padding: '12px 24px',
@@ -392,9 +398,6 @@ export default function BridgeManagement() {
                       <option value="fair">Fair</option>
                       <option value="poor">Poor</option>
                       <option value="critical">Critical</option>
-                      <option value="active">Active</option>
-                      <option value="maintenance">Maintenance</option>
-                      <option value="inactive">Inactive</option>
                     </select>
                   </div>
                 </div>
@@ -423,12 +426,12 @@ export default function BridgeManagement() {
                     Bridges ({filteredBridges.length})
                   </h3>
                   <div style={{ fontSize: '14px', color: '#64748B' }}>
-                    Total: {bridges.length}
+                    Unique: {latestBridges.length}
                   </div>
                 </div>
 
                 <div style={{ maxHeight: '600px', overflow: 'auto' }}>
-                  {isLoading && bridges.length === 0 ? (
+                  {isLoading && latestBridges.length === 0 ? (
                     <div style={{
                       padding: '40px 20px',
                       textAlign: 'center',
@@ -455,10 +458,10 @@ export default function BridgeManagement() {
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                       {filteredBridges.map(bridge => {
-                        const normalized = normalizeLatLng(bridge);
-                        const bqiColor = getBQIColor(bridge.bqi);
-                        const statusColor = getStatusColor(bridge.status);
-                        const bqiStatusText = getBQIStatusText(bridge.bqi);
+                        const mergedBqi = (bridgeDetails[bridge.id] && bridgeDetails[bridge.id].bqi) ?? bridge.bqi
+                        const mergedStatus = (bridgeDetails[bridge.id] && bridgeDetails[bridge.id].status) ?? bridge.status
+                        const statusColor = getStatusColor(mergedStatus)
+                        const bqiColor = getBQIColor(mergedBqi)
                         
                         return (
                           <div 
@@ -502,47 +505,49 @@ export default function BridgeManagement() {
                                     fontWeight: '500',
                                     textTransform: 'capitalize'
                                   }}>
-                                    {bridge.status || 'UNKNOWN'}
+                                    {(bridgeDetails[bridge.id] && bridgeDetails[bridge.id].status) || bridge.status || 'UNKNOWN'}
                                   </div>
-                                  {bridge.bqi !== undefined && bridge.bqi !== null && (
-                                    <div style={{
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: '4px',
-                                      background: bqiColor + '20',
-                                      padding: '4px 8px',
-                                      borderRadius: '12px',
-                                      fontSize: '12px',
-                                      color: '#1E293B',
-                                      border: `1px solid ${bqiColor}`
-                                    }}>
-                                      <div style={{
-                                        width: '8px',
-                                        height: '8px',
-                                        borderRadius: '50%',
-                                        background: bqiColor,
-                                        marginRight: '4px'
-                                      }}></div>
-                                      <span style={{ fontWeight: '600', color: bqiColor }}>BQI: {bridge.bqi}</span>
-                                      <span style={{ color: '#6B7280', marginLeft: '4px' }}>({bqiStatusText})</span>
-                                    </div>
-                                  )}
                                 </div>
                                 
-                                <div style={{ marginBottom: '12px' }}>
+                                <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '16px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                                     <span style={{ fontSize: '14px', color: '#64748B' }}>🆔</span>
                                     <span style={{ fontSize: '14px', color: '#475569' }}>
                                       {bridge.id || 'No ID'}
                                     </span>
                                   </div>
+                                  
+                                  {(mergedBqi !== undefined && mergedBqi !== null) && (
+                                    <div style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '4px',
+                                        background: getBQIColor(mergedBqi) + '20',
+                                        padding: '4px 8px',
+                                        borderRadius: '12px',
+                                        fontSize: '12px',
+                                        color: '#1E293B',
+                                        border: `1px solid ${getBQIColor(mergedBqi)}`
+                                      }}>
+                                        <div style={{
+                                          width: '8px',
+                                          height: '8px',
+                                          borderRadius: '50%',
+                                          background: getBQIColor(mergedBqi),
+                                          marginRight: '4px'
+                                        }}></div>
+                                        <span style={{ fontWeight: '600', color: getBQIColor(mergedBqi) }}>
+                                          BQI: {mergedBqi}
+                                        </span>
+                                      </div>
+                                  )}
                                 </div>
                                 
                                 <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
                                   <div>
                                     <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>Coordinates</div>
                                     <div style={{ fontSize: '13px', color: '#475569' }}>
-                                      {`${(normalized.latitude != null && !isNaN(normalized.latitude)) ? normalized.latitude.toFixed(6) : 'N/A'}, ${(normalized.longitude != null && !isNaN(normalized.longitude)) ? normalized.longitude.toFixed(6) : 'N/A'}`}
+                                      {`${bridge.latitude ? bridge.latitude.toFixed(6) : 'N/A'}, ${bridge.longitude ? bridge.longitude.toFixed(6) : 'N/A'}`}
                                     </div>
                                   </div>
                                 </div>
@@ -663,7 +668,7 @@ export default function BridgeManagement() {
                   </div>
 
                   <div>
-                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#475569' }}>Status</label>
+                    <label style={{ display: 'block', marginBottom: '6px', fontSize: '14px', fontWeight: '500', color: '#475569' }}>Initial Status</label>
                     <select 
                       value={form.status} 
                       onChange={(e) => setForm(f => ({...f, status: e.target.value}))} 
@@ -680,15 +685,15 @@ export default function BridgeManagement() {
                         opacity: isLoading ? 0.7 : 1
                       }}
                     >
-                      <option value="active">Active</option>
-                      <option value="excellent">Excellent</option>
-                      <option value="good">Good</option>
-                      <option value="fair">Fair</option>
-                      <option value="poor">Poor</option>
-                      <option value="critical">Critical</option>
-                      <option value="maintenance">Maintenance</option>
-                      <option value="inactive">Inactive</option>
+                      <option value="EXCELLENT">Excellent</option>
+                      <option value="GOOD">Good</option>
+                      <option value="FAIR">Fair</option>
+                      <option value="POOR">Poor</option>
+                      <option value="CRITICAL">Critical</option>
                     </select>
+                    <small style={{ display: 'block', marginTop: '4px', color: '#94A3B8' }}>
+                      BQI will be calculated by the backend
+                    </small>
                   </div>
 
                   {/* Form Actions */}
@@ -701,7 +706,7 @@ export default function BridgeManagement() {
                         background: isLoading ? '#CBD5E1' : 'linear-gradient(135deg, #0F766E, #3B82F6)', 
                         color: 'white', 
                         border: 'none', 
-                        borderRadius: '8px', 
+                        borderRadius: '8box', 
                         fontWeight: '600', 
                         cursor: isLoading ? 'not-allowed' : 'pointer', 
                         flex: 2, 
@@ -731,7 +736,6 @@ export default function BridgeManagement() {
         </div>
       </div>
 
-      {/* Fix style warnings - use proper JSX style syntax */}
       <style>{`
         @keyframes slideIn {
           from {
@@ -764,7 +768,6 @@ export default function BridgeManagement() {
           box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.1) !important;
         }
         
-        /* Media queries must be in string, not JS object */
         @media (max-width: 1200px) {
           .bridge-grid {
             grid-template-columns: 1fr !important;

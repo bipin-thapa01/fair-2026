@@ -67,35 +67,46 @@ async function request(path, opts = {}) {
   }
 }
 
-// Bridge endpoints - Use fallback data for development if API fails
+// Bridge endpoints - Get bridges with BQI and status from API
 export async function getBridges() {
   try {
-    return await request('/api/bridge')
+    // Get bridges directly from API - it already includes BQI and status
+    const bridges = await request('/api/bridge')
+    
+    // Ensure BQI and status are present (fallback if API doesn't provide)
+    return bridges.map(bridge => ({
+      ...bridge,
+      bqi: bridge.bqi !== undefined ? bridge.bqi : null,
+      status: bridge.status || 'UNKNOWN'
+    }))
   } catch (error) {
     console.warn('Using fallback bridge data due to API error:', error.message)
     
-    // Fallback data for development
+    // Fallback data for development WITH BQI
     const fallbackBridges = [
       {
         id: 'BRIDGE-001',
         name: 'Karnali Bridge',
         status: 'EXCELLENT',
         latitude: 28.6412172,
-        longitude: 81.283269
+        longitude: 81.283269,
+        bqi: 81
       },
       {
         id: 'BRIDGE-002',
         name: 'Bagmati Bridge',
         status: 'GOOD',
         latitude: 27.7172,
-        longitude: 85.3240
+        longitude: 85.3240,
+        bqi: 72
       },
       {
         id: 'BRIDGE-003',
         name: 'Kaligandaki Bridge',
         status: 'FAIR',
         latitude: 27.9833,
-        longitude: 83.7667
+        longitude: 83.7667,
+        bqi: 65
       }
     ]
     
@@ -116,10 +127,16 @@ export async function getBridges() {
   }
 }
 
-// Other functions remain the same but with better error handling
+// Get single bridge - returns with BQI from API
 export async function getBridge(id) {
   try {
-    return await request(`/api/bridge/${id}`)
+    const bridge = await request(`/api/bridge/${id}`)
+    // Ensure BQI and status are included
+    return {
+      ...bridge,
+      bqi: bridge.bqi !== undefined ? bridge.bqi : null,
+      status: bridge.status || 'UNKNOWN'
+    }
   } catch (error) {
     console.error(`Error fetching bridge ${id}:`, error.message)
     throw error
@@ -175,8 +192,42 @@ export async function deleteBridge(id) {
   }
 }
 
-// Export all functions
-// Consolidate and export all API helpers as the default export below
+// Get latest BQI and status for a bridge (from the bridge data itself)
+export async function getLatestHealthLog(bridgeId) {
+  try {
+    // Since BQI and status are now part of bridge data, get the bridge
+    const bridge = await getBridge(bridgeId)
+    
+    if (bridge) {
+      return {
+        id: `health-${bridgeId}-${Date.now()}`,
+        bridgeId: bridgeId,
+        healthIndex: bridge.bqi || 0,
+        healthState: bridge.status || 'UNKNOWN',
+        recommendedAction: getRecommendation(bridge.status),
+        createdAt: new Date().toISOString()
+      }
+    }
+    
+    return null
+  } catch (error) {
+    console.error(`Error fetching health log for ${bridgeId}:`, error.message)
+    return null
+  }
+}
+
+// Helper function to get recommendation based on status
+function getRecommendation(status) {
+  const statusStr = (status || '').toString().toUpperCase()
+  switch(statusStr) {
+    case 'EXCELLENT': return 'Normal operation'
+    case 'GOOD': return 'Monitor closely'
+    case 'FAIR': return 'Schedule inspection'
+    case 'POOR': return 'Immediate inspection required'
+    case 'CRITICAL': return 'Emergency maintenance needed'
+    default: return 'Status unknown'
+  }
+}
 
 // --- Auth and User endpoints ---
 export async function authSignup(payload) {
@@ -221,7 +272,7 @@ export async function getUser(id) {
   }
 }
 
-// Update the getSensorLogs function to use the correct endpoint
+// Sensor logs - optional if needed
 export async function getSensorLogs(bridgeId) {
   try {
     // Try to get ALL sensor logs and filter by bridgeId
@@ -235,71 +286,21 @@ export async function getSensorLogs(bridgeId) {
     return [];
   } catch (error) {
     console.error(`Error fetching sensor logs for ${bridgeId}:`, error.message);
-    
-    // Fallback: Return mock sensor data for development
-    if (error.message.includes('404') || error.message.includes('Endpoint not found')) {
-      console.warn(`No sensor endpoint, using mock data for ${bridgeId}`);
-      
-      // Generate realistic mock sensor data based on bridge ID
-      const mockData = [
-        {
-          id: `sensor-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          bridgeId: bridgeId,
-          strainMicrostrain: 5000 + Math.random() * 10000, // 5000-15000 µε
-          vibrationMs2: 0.5 + Math.random() * 2, // 0.5-2.5 m/s²
-          temperatureC: 15 + Math.random() * 20, // 15-35°C
-          humidityPercent: 30 + Math.random() * 50, // 30-80%
-          createdAt: new Date().toISOString()
-        },
-        {
-          id: `sensor-${Date.now() - 86400000}-${Math.random().toString(36).substr(2, 9)}`,
-          bridgeId: bridgeId,
-          strainMicrostrain: 4000 + Math.random() * 12000,
-          vibrationMs2: 0.3 + Math.random() * 1.7,
-          temperatureC: 18 + Math.random() * 15,
-          humidityPercent: 40 + Math.random() * 40,
-          createdAt: new Date(Date.now() - 86400000).toISOString() // 1 day ago
-        }
-      ];
-      
-      return mockData;
-    }
-    
-    // Return empty array for other errors
     return [];
   }
 }
 
-// Also update getLatestHealthLog
-export async function getLatestHealthLog(bridgeId) {
+// ML logs - optional if needed
+export async function getMLLogs() {
   try {
-    // Get all ML logs and filter
-    const allLogs = await request('/api/bridgeHealth/mlLog');
-    
-    if (allLogs && Array.isArray(allLogs)) {
-      // Find logs for this bridge and get latest
-      const bridgeLogs = allLogs.filter(log => {
-        // Check if the log references this bridge
-        // You might need to adjust this based on your API structure
-        return log.bridgeLogRef?.includes(bridgeId) || 
-               log.bridgeId === bridgeId;
-      });
-      
-      // Sort by createdAt and get latest
-      if (bridgeLogs.length > 0) {
-        return bridgeLogs.sort((a, b) => 
-          new Date(b.createdAt) - new Date(a.createdAt)
-        )[0];
-      }
-    }
-    
-    return null;
+    return await request('/api/bridgeHealth/mlLog');
   } catch (error) {
-    console.error(`Error fetching health log for ${bridgeId}:`, error.message);
-    return null;
+    console.error('Error fetching ML logs:', error.message);
+    return [];
   }
 }
 
+// Update bridge BQI - if your API supports updating BQI
 export async function updateBridgeBQI(bridgeId, bqi, status) {
   try {
     return await request(`/api/bridge/${bridgeId}/health`, {
@@ -311,84 +312,36 @@ export async function updateBridgeBQI(bridgeId, bqi, status) {
     
     // If endpoint doesn't exist, we'll handle it in the frontend
     if (error.message.includes('404')) {
-      console.warn('BQI update endpoint not available, storing locally');
-      // Store in localStorage for demo
-      const bridgeHealth = JSON.parse(localStorage.getItem('bqi_health_data') || '{}');
-      bridgeHealth[bridgeId] = { bqi, status, updatedAt: new Date().toISOString() };
-      localStorage.setItem('bqi_health_data', JSON.stringify(bridgeHealth));
-      return { success: true, storedLocally: true };
+      console.warn('BQI update endpoint not available');
+      return { success: false, message: 'BQI update endpoint not available' };
     }
     
     throw error;
   }
 }
 
-// Bridge Health Log endpoints
-
-export async function getMLLogs() {
-  try {
-    return await request('/api/bridgeHealth/mlLog');
-  } catch (error) {
-    console.error('Error fetching ML logs:', error.message);
-    
-    // Fallback mock data
-    if (error.message.includes('404') || error.message.includes('Endpoint not found')) {
-      console.warn('No ML endpoint, using mock data');
-      
-      // Generate mock ML logs
-      const healthStates = ['EXCELLENT', 'GOOD', 'FAIR', 'POOR', 'CRITICAL'];
-      const recommendations = [
-        'Normal operation',
-        'Monitor closely',
-        'Schedule inspection',
-        'Immediate inspection required',
-        'Emergency maintenance needed'
-      ];
-      
-      const mockLogs = [];
-      const now = new Date();
-      
-      for (let i = 0; i < 8; i++) {
-        const healthState = healthStates[Math.floor(Math.random() * healthStates.length)];
-        const healthIndex = healthState === 'EXCELLENT' ? 85 + Math.random() * 15 :
-                          healthState === 'GOOD' ? 70 + Math.random() * 15 :
-                          healthState === 'FAIR' ? 50 + Math.random() * 20 :
-                          healthState === 'POOR' ? 30 + Math.random() * 20 : 
-                          10 + Math.random() * 20;
-        
-        mockLogs.push({
-          id: `ml-${Date.now()}-${i}`,
-          bridgeLogRef: `sensor-${Date.now()}-${i}`,
-          healthIndex: Math.round(healthIndex),
-          healthState: healthState,
-          recommendedAction: recommendations[healthStates.indexOf(healthState)],
-          createdAt: new Date(now.getTime() - i * 3600000).toISOString() // Each hour back
-        });
-      }
-      
-      return mockLogs;
-    }
-    
-    return [];
-  }
-}
-
-
+// Export all functions
 const api = {
+  // Bridge endpoints
   getBridges,
   getBridge,
   addBridge,
   updateBridge,
   deleteBridge,
+  
+  // Health endpoints
+  getLatestHealthLog,
+  getSensorLogs,
+  getMLLogs,
+  updateBridgeBQI,
+  
+  // Auth endpoints
   authSignup,
   authLogin,
+  
+  // User endpoints
   getUsers,
-  getUser,
-  getSensorLogs,
-  getLatestHealthLog,
-  updateBridgeBQI,
-  getSensorLogs,
-  getMLLogs
+  getUser
 }
 
 export default api
