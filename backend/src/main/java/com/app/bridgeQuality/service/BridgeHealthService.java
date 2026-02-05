@@ -63,7 +63,9 @@ public class BridgeHealthService {
 
         // UPDATE BRIDGE STATUS BASED ON ML OUTPUT
         String updatedStatus = mapHealthStateToBridgeStatus(mlResponse.getHealthState());
+        Integer updateBQI = mlResponse.getHealthIndex();
         bridge.setStatus(BridgeStatus.valueOf(updatedStatus));
+        bridge.setBqi(updateBQI);
         bridgeRepository.save(bridge);
 
         // Return response

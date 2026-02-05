@@ -50,7 +50,8 @@ public class BridgeService {
                 bridge.getName(),
                 bridge.getStatus(),
                 bridge.getLocation().getY(), // latitude
-                bridge.getLocation().getX()  // longitude
+                bridge.getLocation().getX(),  // longitude
+                bridge.getBqi()
         );
     }
 }
