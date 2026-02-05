@@ -16,4 +16,5 @@ public class BridgeResponse {
     BridgeStatus status;
     double longitude;
     double latitude;
+    Integer bqi;
 }

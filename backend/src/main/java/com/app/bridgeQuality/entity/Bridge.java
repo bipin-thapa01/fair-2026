@@ -5,9 +5,7 @@ import java.time.OffsetDateTime;
 import jakarta.persistence.*;
 import lombok.Builder;
 import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.JdbcTypeCode;
-import org.hibernate.annotations.Type;
-import org.hibernate.type.SqlTypes;
+import org.jetbrains.annotations.NotNull;
 import org.locationtech.jts.geom.Point;
 
 import com.app.bridgeQuality.entity.enums.BridgeStatus;
@@ -23,7 +21,7 @@ import org.springframework.data.domain.Persistable;
 @Entity
 @Table(name = "bridges")
 @Builder
-public class Bridge implements Persistable<String> {
+public class Bridge implements Persistable<@NotNull String> {
     @Id
     private String id;
 
@@ -46,6 +44,9 @@ public class Bridge implements Persistable<String> {
 
     @Column(name = "location", columnDefinition = "geography(Point,4326)", nullable = false)
     private Point location;
+
+    @Column(name = "bqi", nullable = false)
+    private Integer bqi;
 
     @PostLoad
     @PostPersist

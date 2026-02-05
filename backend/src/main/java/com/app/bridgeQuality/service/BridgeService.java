@@ -1,17 +1,19 @@
 package com.app.bridgeQuality.service;
 
-import com.app.bridgeQuality.dto.BridgeCreateRequest;
-import com.app.bridgeQuality.dto.BridgeResponse;
-import com.app.bridgeQuality.entity.Bridge;
-import com.app.bridgeQuality.entity.enums.BridgeStatus;
-import com.app.bridgeQuality.repository.BridgeRepository;
-import jakarta.transaction.Transactional;
-import lombok.RequiredArgsConstructor;
 import org.locationtech.jts.geom.Coordinate;
 import org.locationtech.jts.geom.GeometryFactory;
 import org.locationtech.jts.geom.Point;
 import org.locationtech.jts.geom.PrecisionModel;
 import org.springframework.stereotype.Service;
+
+import com.app.bridgeQuality.dto.BridgeCreateRequest;
+import com.app.bridgeQuality.dto.BridgeResponse;
+import com.app.bridgeQuality.entity.Bridge;
+import com.app.bridgeQuality.entity.enums.BridgeStatus;
+import com.app.bridgeQuality.repository.BridgeRepository;
+
+import jakarta.transaction.Transactional;
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -48,7 +50,8 @@ public class BridgeService {
                 bridge.getName(),
                 bridge.getStatus(),
                 bridge.getLocation().getY(), // latitude
-                bridge.getLocation().getX()  // longitude
+                bridge.getLocation().getX(),  // longitude
+                bridge.getBqi()
         );
     }
 }
