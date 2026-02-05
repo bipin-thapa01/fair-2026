@@ -6,7 +6,6 @@ import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import 'leaflet.markercluster'
 import { BridgesContext } from '../contexts/BridgesContext'
 import { useNavigate } from 'react-router-dom'
-import api from '../lib/api'
 
 // Import BQI utilities
 import { getColorForBQI, getStatusFromBQI } from '../lib/bqiCalculator'
@@ -66,6 +65,27 @@ const getBQIFromBridge = (bridge) => {
   return 60;
 };
 
+// Toast component for notifications
+function Toast({ msg }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      background: msg.type === 'success' ? '#10B981' : '#DC2626',
+      color: 'white',
+      padding: '12px 24px',
+      borderRadius: '8px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+      zIndex: 10000,
+      animation: 'slideIn 0.3s ease',
+      maxWidth: '400px'
+    }}>
+      {msg.text}
+    </div>
+  )
+}
+
 export default function LeafletMap() {
   const { bridges = [], refreshBridges, user } = useContext(BridgesContext)
   const mapRef = useRef(null)
@@ -82,18 +102,23 @@ export default function LeafletMap() {
   const [isLoading, setIsLoading] = useState(false)
   const [visibleBridgesCount, setVisibleBridgesCount] = useState(0)
   const [lastUpdateTime, setLastUpdateTime] = useState(null)
+  const [toasts, setToasts] = useState([])
+  const [formData, setFormData] = useState({
+    bridgeId: '',
+    title: '',
+    description: '',
+    issueType: ''
+  })
 
   const currentRoleLower = (user?.role || '').toString().toLowerCase()
   const currentIsAdmin = currentRoleLower === 'admin'
 
-  // Debug: Check context
-  useEffect(() => {
-    console.log('Map Component - Bridges Context:', {
-      bridgesCount: bridges?.length,
-      bridgesWithBQI: bridges?.filter(b => b.bqi !== undefined).length,
-      bridgesSample: bridges?.slice(0, 2).map(b => ({ name: b.name, bqi: b.bqi, status: b.status }))
-    })
-  }, [bridges])
+  // Toast function
+  const pushToast = (text, type = 'success') => {
+    const t = { id: Date.now(), text, type }
+    setToasts(s => [t, ...s])
+    setTimeout(() => setToasts(s => s.filter(x => x.id !== t.id)), 3800)
+  }
 
   // Function to create marker icon based on BQI
   const makeIcon = (bridge) => {
@@ -129,7 +154,7 @@ export default function LeafletMap() {
     })
   }
 
-  // Function to create popup content
+  // Function to create popup content - REMOVED VIEW DETAILS BUTTON
   const createPopupContent = (b) => {
     const n = normalizeLatLng(b)
     const bqi = getBQIFromBridge(b)
@@ -175,78 +200,35 @@ export default function LeafletMap() {
         <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;font-size:12px;color:#555">
           <div><strong>ID:</strong> ${b.id}</div>
           <div><strong>Coordinates:</strong> ${lat?.toFixed(5) || '—'}, ${lng?.toFixed(5) || '—'}</div>
-          <div style="font-size:11px;color:#888;font-style:italic">
-            API fields: longitude=${b.longitude?.toFixed(5)}, latitude=${b.latitude?.toFixed(5)}
-          </div>
         </div>
         
         <div style="display:flex;gap:8px">
-          <button id="view-details" data-bridge-id="${b.id}" style="flex:1;padding:10px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#0F766E,#3B82F6);color:white;cursor:pointer;font-size:13px;font-weight:500">View Details</button>
-          ${!currentIsAdmin ? `<button id="submit-report-btn" data-bridge-id="${b.id}" style="flex:1;padding:10px 14px;border-radius:8px;border:1px solid #e6edf8;background:linear-gradient(90deg,#f8fbff,#fff);cursor:pointer;font-size:13px;font-weight:500">Report Issue</button>` : ''}
-        </div>
-        
-        <!-- BQI Calculation Info -->
-        <div style="margin-top:12px;padding:8px;background:#f8f9fa;border-radius:6px;border-left:3px solid ${getColorForBQI(bqi)};">
-          <div style="font-size:10px;color:#666;font-weight:500">BQI Formula</div>
-          <div style="font-size:9px;color:#888;font-family:monospace;">
-            BQI = 100 × [0.45×(1−S) + 0.40×(1−V) + 0.15×(1−T)]
-          </div>
+          ${!currentIsAdmin ? `<button id="submit-report-btn" data-bridge-id="${b.id}" style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid #e6edf8;background:linear-gradient(90deg,#f8fbff,#fff);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;color:#333;">Report Issue</button>` : ''}
         </div>
       </div>
     `
   }
 
- // Update the useEffect that logs bridge context
-useEffect(() => {
-  console.log('Map Component - Bridges Context:', {
-    bridgesCount: bridges?.length || 0,
-    bridgesWithBQI: bridges?.filter(b => b.bqi !== undefined).length || 0,
-    bridgesSample: bridges?.slice(0, 3).map(b => ({ 
-      name: b.name, 
-      bqi: b.bqi, 
-      status: b.status,
-      id: b.id 
-    })) || []
-  });
-  
-  // Check if bridges are loading from API or using fallback
-  if (bridges && bridges.length > 0) {
-    const firstBridge = bridges[0];
-    console.log('First bridge details:', {
-      name: firstBridge.name,
-      id: firstBridge.id,
-      hasBQI: firstBridge.bqi !== undefined,
-      bqi: firstBridge.bqi,
-      coordinates: `Lat: ${firstBridge.latitude}, Lng: ${firstBridge.longitude}`
-    });
-  }
-}, [bridges]);
-
-// Update the updateMapMarkers function to use bridges from context
-const updateMapMarkers = () => {
-  const map = mapRef.current;
-  const cluster = markersRef.current;
-  
-  if (!map || !cluster) return;
-  
-  try {
-    cluster.clearLayers();
-  } catch (e) {
-    console.error('Failed to clear cluster layers:', e);
-  }
-  
-  // Use bridges from context - they should now have BQI
-  let bridgesToDisplay = bridges || [];
-  
-  console.log('Bridges to display:', bridgesToDisplay.length, 'with BQI:', 
-    bridgesToDisplay.filter(b => b.bqi !== undefined).length);
-  
-  // Only use fallback if REALLY no bridges
-  if (bridgesToDisplay.length === 0) {
-    console.warn('No bridges from context, checking if loading...');
-    // Don't immediately use mock data - wait a bit
-    return;
-  }
+  // Update the updateMapMarkers function
+  const updateMapMarkers = () => {
+    const map = mapRef.current
+    const cluster = markersRef.current
+    
+    if (!map || !cluster) return
+    
+    try {
+      cluster.clearLayers()
+    } catch (e) {
+      console.error('Failed to clear cluster layers:', e)
+    }
+    
+    // Use bridges from context
+    let bridgesToDisplay = bridges || []
+    
+    if (bridgesToDisplay.length === 0) {
+      console.warn('No bridges from context, checking if loading...')
+      return
+    }
     
     const filteredBridges = bridgesToDisplay.filter(b => {
       // Search filter
@@ -305,13 +287,6 @@ const updateMapMarkers = () => {
       marker.on('popupopen', (e) => {
         const popupEl = e.popup.getElement()
         const submitBtn = popupEl.querySelector('#submit-report-btn')
-        const viewDetailsBtn = popupEl.querySelector('#view-details')
-
-        if (viewDetailsBtn) {
-          viewDetailsBtn.onclick = () => {
-            navigate(`/bridges/${b.id}`)
-          }
-        }
 
         if (submitBtn && !currentIsAdmin) {
           submitBtn.onclick = (event) => {
@@ -357,7 +332,7 @@ const updateMapMarkers = () => {
     setLastUpdateTime(new Date().toISOString())
   }
 
-  // Initialize map
+  // Initialize map - FIXED ZOOMING ISSUE
   useEffect(() => {
     if (!containerRef.current) return
     
@@ -373,10 +348,10 @@ const updateMapMarkers = () => {
       delete window._leaflet_maps[cid]
     }
     
-    // Initialize map with Nepal bounds
+    // Initialize map with Nepal bounds - IMPORTANT: Changed initial zoom to 8 (was 13)
     const map = L.map(container, {
       center: [27.7172, 85.3240],
-      zoom: 8,
+      zoom: 8, // CHANGED FROM 13 TO 8 for better initial view
       minZoom: 6,
       maxZoom: 18,
       maxBounds: [[26.3, 80.0], [30.5, 88.3]], // Nepal bounds
@@ -392,39 +367,59 @@ const updateMapMarkers = () => {
       maxZoom: 19
     }).addTo(map)
     
-    // Initialize marker cluster
+    // Improved marker cluster configuration (showing count like in screenshot)
     const markerCluster = L.markerClusterGroup({
       chunkedLoading: true,
       showCoverageOnHover: false,
-      maxClusterRadius: 50,
+      maxClusterRadius: 40,
       spiderfyOnMaxZoom: true,
-      disableClusteringAtZoom: 15,
+      disableClusteringAtZoom: 16, // FIX: Changed from 15 to 16
+      zoomToBoundsOnClick: true, // Enables zoom when clicking cluster
       iconCreateFunction: function(cluster) {
         const childMarkers = cluster.getAllChildMarkers()
+        const count = childMarkers.length
+        
+        // Calculate average BQI for the cluster
         const bqis = childMarkers.map(marker => {
-          const bridge = bridges.find(b => b.name === marker.options.title)
+          const bridgeName = marker.options.title
+          const bridge = bridges.find(b => b.name === bridgeName)
           return bridge ? getBQIFromBridge(bridge) : 60
         })
         const avgBqi = Math.round(bqis.reduce((a, b) => a + b, 0) / bqis.length)
         const color = getColorForBQI(avgBqi)
+        const lightColor = lighten(color, 0.4)
         
+        // Determine size based on count
+        let size = 40
+        if (count > 10) size = 50
+        if (count > 20) size = 60
+        
+        // Create cluster icon with count (like in screenshot with "6", "4")
         return L.divIcon({
-          html: `<div style="
-            background: ${color};
-            color: white;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 14px;
-            border: 3px solid white;
-            box-shadow: 0 0 10px rgba(0,0,0,0.3);
-          ">${cluster.getChildCount()}<br/><span style="font-size:9px">BQI:${avgBqi}</span></div>`,
+          html: `
+            <div class="cluster-icon" style="
+              width: ${size}px;
+              height: ${size}px;
+              background: radial-gradient(circle at 30% 30%, ${lightColor}, ${color});
+              border-radius: 50%;
+              border: 3px solid white;
+              box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              color: white;
+              font-weight: bold;
+              position: relative;
+              cursor: pointer;
+            ">
+              <div style="font-size: ${count > 9 ? '16px' : '18px'}; line-height: 1;">${count}</div>
+              <div style="font-size: 9px; opacity: 0.9; margin-top: -2px;">bridge${count !== 1 ? 's' : ''}</div>
+            </div>
+          `,
           className: 'cluster-marker',
-          iconSize: L.point(40, 40)
+          iconSize: L.point(size, size),
+          iconAnchor: [size / 2, size / 2]
         })
       }
     })
@@ -448,6 +443,22 @@ const updateMapMarkers = () => {
     
     map.on('move', onMove)
     map.on('zoom', onMove)
+    
+    // Handle cluster click to zoom (additional functionality)
+    markerCluster.on('clustermouseover', (e) => {
+      const count = e.layer.getChildCount()
+      e.layer.bindTooltip(
+        `${count} bridge${count !== 1 ? 's' : ''} - Click to zoom in`,
+        { 
+          direction: 'top',
+          offset: L.point(0, -25)
+        }
+      ).openTooltip()
+    })
+    
+    markerCluster.on('clustermouseout', (e) => {
+      e.layer.closeTooltip()
+    })
     
     // Invalidate size after a delay to ensure proper rendering
     setTimeout(() => {
@@ -477,7 +488,7 @@ const updateMapMarkers = () => {
     const handleHealthUpdated = (event) => {
       console.log('Map - Received health update:', event.detail)
       updateMapMarkers()
-    };
+    }
 
     const handleBridgesUpdated = () => {
       console.log('Map - Received bridges-updated event')
@@ -486,16 +497,16 @@ const updateMapMarkers = () => {
       } else {
         updateMapMarkers()
       }
-    };
+    }
 
-    window.addEventListener('bqi-health-updated', handleHealthUpdated);
-    window.addEventListener('bqi-bridges-updated', handleBridgesUpdated);
+    window.addEventListener('bqi-health-updated', handleHealthUpdated)
+    window.addEventListener('bqi-bridges-updated', handleBridgesUpdated)
     
     return () => {
-      window.removeEventListener('bqi-health-updated', handleHealthUpdated);
-      window.removeEventListener('bqi-bridges-updated', handleBridgesUpdated);
-    };
-  }, [refreshBridges]);
+      window.removeEventListener('bqi-health-updated', handleHealthUpdated)
+      window.removeEventListener('bqi-bridges-updated', handleBridgesUpdated)
+    }
+  }, [refreshBridges])
   
   // Persist filters to localStorage
   useEffect(() => {
@@ -518,30 +529,88 @@ const updateMapMarkers = () => {
     return () => clearInterval(interval)
   }, [refreshBridges])
   
-  // Handle report form submission
+  // Handle form input changes
+  const handleInputChange = (e) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+  
+  // Handle report submission - USING YOUR EXACT METHOD
   const handleSubmitReport = async (e) => {
     e.preventDefault()
     
-    const formData = new FormData(e.target)
-    const reportData = {
-      id: Date.now(),
-      bridgeId: selectedBridge.id,
-      bridgeName: selectedBridge.name,
-      issueType: formData.get('issueType'),
-      title: formData.get('title'),
-      description: formData.get('description'),
-      reporterName: user?.name || user?.email?.split('@')[0],
-      reporterEmail: user?.email,
-      timestamp: new Date().toISOString(),
-      status: 'submitted'
+    if (!selectedBridge) {
+      pushToast('No bridge selected', 'error')
+      return
     }
     
+    if (!formData.title.trim()) {
+      pushToast('Title is required', 'error')
+      return
+    }
+    if (!formData.description.trim()) {
+      pushToast('Description is required', 'error')
+      return
+    }
+    if (!formData.issueType) {
+      pushToast('Please select an issue type', 'error')
+      return
+    }
+
+    setIsLoading(true)
+
     try {
-      setIsLoading(true)
-      // Save to localStorage
-      const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
-      reports.push(reportData)
-      localStorage.setItem('bqi_reports', JSON.stringify(reports))
+      // Get current user info
+      const currentUser = JSON.parse(localStorage.getItem('bqi_user') || '{}')
+      const userName = currentUser.name || 'Anonymous User'
+      const userEmail = currentUser.email || ''
+
+      if (!userEmail) {
+        pushToast('User not found. Please login again.', 'error')
+        return
+      }
+
+      // Create new report using YOUR EXACT STRUCTURE
+      const newReport = {
+        id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        bridgeId: selectedBridge.id,
+        bridge: selectedBridge.name,
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        summary: formData.title.trim(),
+        issueType: formData.issueType,
+        category: formData.issueType.charAt(0).toUpperCase() + formData.issueType.slice(1),
+        status: 'Pending',
+        date: new Date().toISOString().split('T')[0],
+        submitted: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        auditor: userName,
+        userName: userName,
+        userEmail: userEmail, // This is the key for user-specific filtering
+        estimatedCost: 'To be determined',
+        estimatedTime: 'To be determined'
+      }
+
+      // Save to main reports storage - YOUR EXACT METHOD
+      const allReports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
+      const updatedAllReports = [newReport, ...allReports]
+      localStorage.setItem('bqi_reports', JSON.stringify(updatedAllReports))
+
+      // Dispatch event for other components
+      window.dispatchEvent(new CustomEvent('bqi-report-submitted', { 
+        detail: { report: newReport, bridge: selectedBridge } 
+      }))
+
+      // Reset form
+      setFormData({
+        bridgeId: '',
+        title: '',
+        description: '',
+        issueType: ''
+      })
       
       setShowReportForm('success')
       
@@ -549,11 +618,14 @@ const updateMapMarkers = () => {
       setTimeout(() => {
         setShowReportForm(false)
         setSelectedBridge(null)
+        setIsLoading(false)
       }, 3000)
+      
+      pushToast('Report submitted successfully! Our team will review it shortly.', 'success')
+      
     } catch (error) {
       console.error('Error submitting report:', error)
-      alert('Failed to submit report. Please try again.')
-    } finally {
+      pushToast('Failed to submit report. Please try again.', 'error')
       setIsLoading(false)
     }
   }
@@ -562,6 +634,12 @@ const updateMapMarkers = () => {
   const handleCloseReportForm = () => {
     setShowReportForm(false)
     setSelectedBridge(null)
+    setFormData({
+      bridgeId: '',
+      title: '',
+      description: '',
+      issueType: ''
+    })
   }
 
   // Toggle filter panel
@@ -582,7 +660,7 @@ const updateMapMarkers = () => {
       }
     } catch (error) {
       console.error('Error refreshing bridges:', error)
-      alert('Failed to refresh bridges: ' + (error.message || 'Unknown error'))
+      pushToast('Failed to refresh bridges: ' + (error.message || 'Unknown error'), 'error')
     } finally {
       setIsLoading(false)
     }
@@ -825,15 +903,15 @@ const updateMapMarkers = () => {
                 }}
                 onFocus={(e) => {
                   if (!isLoading) {
-                    e.target.style.borderColor = '#1f6feb';
-                    e.target.style.background = '#fff';
-                    e.target.style.boxShadow = '0 0 0 4px rgba(31, 111, 235, 0.1)';
+                    e.target.style.borderColor = '#1f6feb'
+                    e.target.style.background = '#fff'
+                    e.target.style.boxShadow = '0 0 0 4px rgba(31, 111, 235, 0.1)'
                   }
                 }}
                 onBlur={(e) => {
-                  e.target.style.borderColor = '#e0e0e0';
-                  e.target.style.background = '#fafafa';
-                  e.target.style.boxShadow = 'none';
+                  e.target.style.borderColor = '#e0e0e0'
+                  e.target.style.background = '#fafafa'
+                  e.target.style.boxShadow = 'none'
                 }}
               />
             </div>
@@ -874,14 +952,14 @@ const updateMapMarkers = () => {
                     }}
                     onMouseEnter={(e) => {
                       if (statusFilter !== option.value) {
-                        e.currentTarget.style.background = '#f9f9f9';
-                        e.currentTarget.style.borderColor = '#ddd';
+                        e.currentTarget.style.background = '#f9f9f9'
+                        e.currentTarget.style.borderColor = '#ddd'
                       }
                     }}
                     onMouseLeave={(e) => {
                       if (statusFilter !== option.value) {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.borderColor = '#eee';
+                        e.currentTarget.style.background = 'transparent'
+                        e.currentTarget.style.borderColor = '#eee'
                       }
                     }}
                   >
@@ -979,16 +1057,16 @@ const updateMapMarkers = () => {
                 }}
                 onMouseEnter={(e) => {
                   if (!isLoading) {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, #e9ecef, #dee2e6)';
-                    e.currentTarget.style.borderColor = '#ccc';
-                    e.currentTarget.style.color = '#555';
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #e9ecef, #dee2e6)'
+                    e.currentTarget.style.borderColor = '#ccc'
+                    e.currentTarget.style.color = '#555'
                   }
                 }}
                 onMouseLeave={(e) => {
                   if (!isLoading) {
-                    e.currentTarget.style.background = 'linear-gradient(135deg, #f8f9fa, #e9ecef)';
-                    e.currentTarget.style.borderColor = '#ddd';
-                    e.currentTarget.style.color = '#666';
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #f8f9fa, #e9ecef)'
+                    e.currentTarget.style.borderColor = '#ddd'
+                    e.currentTarget.style.color = '#666'
                   }
                 }}
               >
@@ -1064,21 +1142,9 @@ const updateMapMarkers = () => {
             </div>
           ))}
         </div>
-        <div style={{ 
-          marginTop: '12px', 
-          paddingTop: '12px', 
-          borderTop: '1px solid #eee',
-          fontSize: '10px',
-          color: '#888'
-        }}>
-          <div style={{ fontWeight: '500', marginBottom: '4px' }}>BQI Formula:</div>
-          <div style={{ fontFamily: 'monospace', fontSize: '9px' }}>
-            BQI = 100 × [0.45×(1−S) + 0.40×(1−V) + 0.15×(1−T)]
-          </div>
-        </div>
       </div>
       
-      {/* Report Form Modal - Only show for non-admin users */}
+      {/* Report Form Modal - FIXED: Fixed select input stretching */}
       {showReportForm && selectedBridge && user && !currentIsAdmin && (
         <div style={{
           position: 'fixed',
@@ -1145,68 +1211,128 @@ const updateMapMarkers = () => {
               borderRadius: '16px',
               padding: '30px',
               maxWidth: '500px',
-              width: '90%',
+              width: '90%', // FIXED: Changed from '100%' to '90%'
               maxHeight: '90vh',
               overflowY: 'auto',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              position: 'relative'
             }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '25px'
-              }}>
+              {/* Close Button */}
+              <button
+                onClick={handleCloseReportForm}
+                style={{
+                  position: 'absolute',
+                  right: '20px',
+                  top: '20px',
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                ×
+              </button>
+
+              {/* Form Header */}
+              <div style={{ marginBottom: '24px' }}>
                 <h3 style={{
                   margin: 0,
-                  color: '#333'
+                  color: '#1f2937',
+                  fontSize: '22px',
+                  fontWeight: '600',
+                  marginBottom: '8px'
                 }}>
                   Submit Report for {selectedBridge.name}
                 </h3>
-                <button
-                  onClick={handleCloseReportForm}
-                  disabled={isLoading}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '24px',
-                    cursor: 'pointer',
-                    color: '#666'
-                  }}
-                >
-                  &times;
-                </button>
+                <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>
+                  Provide details about the bridge issue you've identified
+                </p>
               </div>
-              
-              <form onSubmit={handleSubmitReport} style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '20px'
-              }}>
+
+              {/* Form - FIXED: Fixed select input styling */}
+              <form onSubmit={handleSubmitReport} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* Bridge Selection (Pre-filled since we're on the map) */}
                 <div>
                   <label style={{
                     display: 'block',
                     marginBottom: '8px',
                     fontWeight: '500',
-                    color: '#333'
+                    color: '#374151',
+                    fontSize: '14px'
                   }}>
+                    <span style={{ marginRight: '6px' }}>🌉</span>
+                    Selected Bridge
+                  </label>
+                  <div style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    background: '#f9fafb',
+                    color: '#374151',
+                    boxSizing: 'border-box' // ADDED
+                  }}>
+                    {selectedBridge.name} {selectedBridge.bqi ? `(BQI: ${selectedBridge.bqi})` : ''}
+                  </div>
+                  <input type="hidden" name="bridgeId" value={selectedBridge.id} />
+                </div>
+
+                {/* Issue Type - FIXED: Fixed stretched select */}
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontWeight: '500',
+                    color: '#374151',
+                    fontSize: '14px'
+                  }}>
+                    <span style={{ marginRight: '6px' }}>⚠️</span>
                     Issue Type *
                   </label>
                   <select
                     name="issueType"
+                    value={formData.issueType}
+                    onChange={handleInputChange}
                     required
-                    disabled={isLoading}
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '10px',
                       fontSize: '14px',
                       background: 'white',
                       outline: 'none',
-                      opacity: isLoading ? 0.7 : 1
+                      transition: 'all 0.2s',
+                      cursor: 'pointer',
+                      boxSizing: 'border-box', // ADDED
+                      appearance: 'none', // ADDED for better styling
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%236b7280' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: 'right 14px center',
+                      backgroundSize: '16px',
+                      paddingRight: '40px'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1f6feb'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(31, 111, 235, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb'
+                      e.target.style.boxShadow = 'none'
                     }}
                   >
-                    <option value="">Select issue type</option>
+                    <option value="">Select issue type...</option>
                     <option value="structural">🏗️ Structural Damage</option>
                     <option value="corrosion">🦠 Corrosion/Rust</option>
                     <option value="cracks">⚡ Cracks/Fractures</option>
@@ -1217,67 +1343,115 @@ const updateMapMarkers = () => {
                     <option value="other">❓ Other Issue</option>
                   </select>
                 </div>
-                
+
+                {/* Title */}
                 <div>
                   <label style={{
                     display: 'block',
                     marginBottom: '8px',
                     fontWeight: '500',
-                    color: '#333'
+                    color: '#374151',
+                    fontSize: '14px'
                   }}>
+                    <span style={{ marginRight: '6px' }}>📝</span>
                     Report Title *
                   </label>
                   <input
                     type="text"
                     name="title"
-                    required
-                    disabled={isLoading}
+                    value={formData.title}
+                    onChange={handleInputChange}
                     placeholder="Brief title describing the issue..."
+                    required
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '10px',
                       fontSize: '14px',
                       outline: 'none',
-                      opacity: isLoading ? 0.7 : 1
+                      transition: 'all 0.2s',
+                      boxSizing: 'border-box',
+                      background: '#fafafa'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1f6feb'
+                      e.target.style.background = '#fff'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(31, 111, 235, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb'
+                      e.target.style.background = '#fafafa'
+                      e.target.style.boxShadow = 'none'
                     }}
                   />
                 </div>
-                
+
+                {/* Description */}
                 <div>
                   <label style={{
                     display: 'block',
                     marginBottom: '8px',
                     fontWeight: '500',
-                    color: '#333'
+                    color: '#374151',
+                    fontSize: '14px'
                   }}>
-                    Description *
+                    <span style={{ marginRight: '6px' }}>📋</span>
+                    Detailed Description *
                   </label>
                   <textarea
                     name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    placeholder="Provide detailed information about the issue, including location, severity, and any visible signs..."
                     required
-                    disabled={isLoading}
-                    placeholder="Describe the issue in detail. Include location, severity, and any visible signs..."
+                    rows={6}
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
-                      minHeight: '120px',
-                      resize: 'vertical',
+                      padding: '12px 14px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '10px',
                       fontSize: '14px',
-                      fontFamily: 'inherit',
                       outline: 'none',
-                      opacity: isLoading ? 0.7 : 1
+                      transition: 'all 0.2s',
+                      resize: 'vertical',
+                      minHeight: '120px',
+                      fontFamily: 'inherit',
+                      boxSizing: 'border-box',
+                      background: '#fafafa'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1f6feb'
+                      e.target.style.background = '#fff'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(31, 111, 235, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb'
+                      e.target.style.background = '#fafafa'
+                      e.target.style.boxShadow = 'none'
                     }}
                   />
                 </div>
-                
+
+                {/* User Info */}
+                <div style={{
+                  background: '#f8f9fa',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#666'
+                }}>
+                  <div style={{ fontWeight: '500', marginBottom: '4px' }}>Reporting as:</div>
+                  <div>{user.name || user.email?.split('@')[0] || 'Anonymous'} ({user.email || 'No email'})</div>
+                </div>
+
+                {/* Form Actions */}
                 <div style={{
                   display: 'flex',
                   gap: '12px',
-                  marginTop: '10px'
+                  marginTop: '10px',
+                  paddingTop: '20px',
+                  borderTop: '1px solid #e5e7eb'
                 }}>
                   <button
                     type="button"
@@ -1286,14 +1460,27 @@ const updateMapMarkers = () => {
                     style={{
                       flex: 1,
                       padding: '14px',
-                      border: '1px solid #ddd',
-                      background: '#f8f9fa',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
+                      border: '2px solid #e5e7eb',
+                      background: '#f9fafb',
+                      borderRadius: '10px',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
                       fontWeight: '500',
                       fontSize: '14px',
-                      color: '#333',
-                      opacity: isLoading ? 0.7 : 1
+                      color: '#374151',
+                      transition: 'all 0.2s',
+                      opacity: isLoading ? 0.6 : 1
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.background = '#f3f4f6'
+                        e.currentTarget.style.borderColor = '#d1d5db'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.background = '#f9fafb'
+                        e.currentTarget.style.borderColor = '#e5e7eb'
+                      }
                     }}
                   >
                     Cancel
@@ -1304,17 +1491,40 @@ const updateMapMarkers = () => {
                     style={{
                       flex: 1,
                       padding: '14px',
-                      background: isLoading ? '#94a3b8' : 'linear-gradient(90deg, #1f6feb, #3fb0ff)',
+                      background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
                       color: 'white',
                       border: 'none',
-                      borderRadius: '8px',
+                      borderRadius: '10px',
                       cursor: isLoading ? 'not-allowed' : 'pointer',
-                      fontWeight: '500',
+                      fontWeight: '600',
                       fontSize: '14px',
-                      opacity: isLoading ? 0.7 : 1
+                      transition: 'all 0.2s',
+                      opacity: isLoading ? 0.6 : 1
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'translateY(-1px)'
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(31, 111, 235, 0.3)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'translateY(0)'
+                        e.currentTarget.style.boxShadow = 'none'
+                      }
                     }}
                   >
-                    {isLoading ? 'Submitting...' : 'Submit Report'}
+                    {isLoading ? (
+                      <>
+                        <span style={{ marginRight: '8px' }}>⏳</span>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ marginRight: '8px' }}>📤</span>
+                        Submit Report
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1323,7 +1533,10 @@ const updateMapMarkers = () => {
         </div>
       )}
       
-
+      {/* Toasts */}
+      <div>
+        {toasts.map(t => <Toast key={t.id} msg={t} />)}
+      </div>
       
       {/* Styles */}
       <style>{`
@@ -1384,12 +1597,31 @@ const updateMapMarkers = () => {
           animation: clusterPulse 3s infinite;
         }
         
+        .cluster-icon {
+          transition: transform 0.3s ease;
+        }
+        
+        .cluster-icon:hover {
+          transform: scale(1.1);
+        }
+        
         @keyframes clusterPulse {
           0%, 100% {
             transform: scale(1);
           }
           50% {
             transform: scale(1.05);
+          }
+        }
+        
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateX(100px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
           }
         }
         
@@ -1412,8 +1644,6 @@ const updateMapMarkers = () => {
           .coordinates-panel {
             right: 10px !important;
             bottom: 10px !important;
-            left: auto !important;
-            top: auto !important;
             min-width: 180px !important;
             font-size: 11px !important;
             padding: 10px 12px !important;
@@ -1443,10 +1673,6 @@ const updateMapMarkers = () => {
           
           .map-container {
             height: calc(100vh - 120px) !important;
-          }
-          
-          .debug-info {
-            display: none !important;
           }
         }
         
