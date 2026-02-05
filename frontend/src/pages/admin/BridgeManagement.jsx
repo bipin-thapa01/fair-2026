@@ -58,7 +58,7 @@ export default function BridgeManagement() {
     apiConnected
   } = useContext(BridgesContext)
   
-  // Helper to normalize coordinates — some API data has lat/lng swapped.
+  // Helper to normalize coordinates
   const normalizeLatLng = (src) => {
     const aRaw = src?.latitude ?? src?.lat
     const bRaw = src?.longitude ?? src?.lng
@@ -161,19 +161,40 @@ export default function BridgeManagement() {
     }
   }
 
+  // Get BQI color based on value
+  const getBQIColor = (bqi) => {
+    if (bqi === null || bqi === undefined) return '#64748B'
+    if (bqi >= 80) return '#10B981' // Excellent
+    if (bqi >= 70) return '#22C55E' // Good
+    if (bqi >= 60) return '#F59E0B' // Fair
+    if (bqi >= 50) return '#EF4444' // Poor
+    return '#DC2626' // Critical
+  }
+
+  // Get status color (now based on API status)
   const getStatusColor = (status) => {
     const statusStr = (status || '').toString().toUpperCase()
     switch(statusStr) {
-      case 'EXCELLENT':
-      case 'ACTIVE': return '#10B981'
-      case 'GOOD':
-      case 'MAINTENANCE': return '#F59E0B'
-      case 'FAIR':
-      case 'INACTIVE': return '#64748B'
-      case 'POOR':
+      case 'EXCELLENT': return '#10B981'
+      case 'GOOD': return '#22C55E'
+      case 'FAIR': return '#F59E0B'
+      case 'POOR': return '#EF4444'
       case 'CRITICAL': return '#DC2626'
+      case 'ACTIVE': return '#3B82F6'
+      case 'MAINTENANCE': return '#F59E0B'
+      case 'INACTIVE': return '#64748B'
       default: return '#64748B'
     }
+  }
+
+  // Get BQI status text based on value
+  const getBQIStatusText = (bqi) => {
+    if (bqi === null || bqi === undefined) return 'No BQI Data'
+    if (bqi >= 80) return 'Excellent'
+    if (bqi >= 70) return 'Good'
+    if (bqi >= 60) return 'Fair'
+    if (bqi >= 50) return 'Poor'
+    return 'Critical'
   }
 
   const filteredBridges = bridges.filter(bridge => {
@@ -433,93 +454,103 @@ export default function BridgeManagement() {
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                      {filteredBridges.map(bridge => (
-                        <div 
-                          key={bridge.id} 
-                          style={{
-                            padding: '16px',
-                            background: '#F8FAFC',
-                            borderRadius: '12px',
-                            border: '1px solid #E2E8F0',
-                            transition: 'all 0.3s ease',
-                            borderLeft: `4px solid ${getStatusColor(bridge.status)}`
-                          }}
-                          onMouseEnter={(e) => {
-                            if (!isLoading) {
-                              e.currentTarget.style.transform = 'translateY(-2px)';
-                              e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
-                            }
-                          }}
-                          onMouseLeave={(e) => {
-                            if (!isLoading) {
-                              e.currentTarget.style.transform = 'translateY(0)';
-                              e.currentTarget.style.boxShadow = 'none';
-                            }
-                          }}
-                        >
-                          <div className="bridge-card-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div style={{ flex: 1 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
-                                <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#1E293B' }}>
-                                  {bridge.name}
-                                </h4>
-                                <div style={{
-                                  display: 'inline-flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  background: getStatusColor(bridge.status) + '20',
-                                  color: getStatusColor(bridge.status),
-                                  padding: '4px 8px',
-                                  borderRadius: '20px',
-                                  fontSize: '12px',
-                                  fontWeight: '500',
-                                  textTransform: 'capitalize'
-                                }}>
-                                  {bridge.status}
-                                </div>
-                                {bridge.bqi !== undefined && (
+                      {filteredBridges.map(bridge => {
+                        const normalized = normalizeLatLng(bridge);
+                        const bqiColor = getBQIColor(bridge.bqi);
+                        const statusColor = getStatusColor(bridge.status);
+                        const bqiStatusText = getBQIStatusText(bridge.bqi);
+                        
+                        return (
+                          <div 
+                            key={bridge.id} 
+                            style={{
+                              padding: '16px',
+                              background: '#F8FAFC',
+                              borderRadius: '12px',
+                              border: '1px solid #E2E8F0',
+                              transition: 'all 0.3s ease',
+                              borderLeft: `4px solid ${statusColor}`
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isLoading) {
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                                e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)';
+                              }
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isLoading) {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }
+                            }}
+                          >
+                            <div className="bridge-card-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '8px' }}>
+                                  <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#1E293B' }}>
+                                    {bridge.name}
+                                  </h4>
                                   <div style={{
                                     display: 'inline-flex',
                                     alignItems: 'center',
-                                    gap: '4px',
-                                    background: '#F3F4F6',
-                                    padding: '2px 8px',
-                                    borderRadius: '12px',
-                                    fontSize: '11px',
-                                    color: '#6B7280'
+                                    gap: '6px',
+                                    background: statusColor + '20',
+                                    color: statusColor,
+                                    padding: '4px 8px',
+                                    borderRadius: '20px',
+                                    fontSize: '12px',
+                                    fontWeight: '500',
+                                    textTransform: 'capitalize'
                                   }}>
-                                    <span>BQI:</span>
-                                    <span style={{ fontWeight: '600' }}>{bridge.bqi}</span>
+                                    {bridge.status || 'UNKNOWN'}
                                   </div>
-                                )}
-                              </div>
-                              
-                              <div style={{ marginBottom: '12px' }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                  <span style={{ fontSize: '14px', color: '#64748B' }}>🆔</span>
-                                  <span style={{ fontSize: '14px', color: '#475569' }}>
-                                    {bridge.id || 'No ID'}
-                                  </span>
+                                  {bridge.bqi !== undefined && bridge.bqi !== null && (
+                                    <div style={{
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '4px',
+                                      background: bqiColor + '20',
+                                      padding: '4px 8px',
+                                      borderRadius: '12px',
+                                      fontSize: '12px',
+                                      color: '#1E293B',
+                                      border: `1px solid ${bqiColor}`
+                                    }}>
+                                      <div style={{
+                                        width: '8px',
+                                        height: '8px',
+                                        borderRadius: '50%',
+                                        background: bqiColor,
+                                        marginRight: '4px'
+                                      }}></div>
+                                      <span style={{ fontWeight: '600', color: bqiColor }}>BQI: {bridge.bqi}</span>
+                                      <span style={{ color: '#6B7280', marginLeft: '4px' }}>({bqiStatusText})</span>
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                              
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                                <div>
-                                  <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>Coordinates</div>
-                                  <div style={{ fontSize: '13px', color: '#475569' }}>
-                                    {(() => {
-                                      const n = normalizeLatLng(bridge)
-                                      const lat = n.latitude
-                                      const lng = n.longitude
-                                      return `${(lat != null && !isNaN(lat)) ? lat.toFixed(6) : 'N/A'}, ${(lng != null && !isNaN(lng)) ? lng.toFixed(6) : 'N/A'}`
-                                    })()}
+                                
+                                <div style={{ marginBottom: '12px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span style={{ fontSize: '14px', color: '#64748B' }}>🆔</span>
+                                    <span style={{ fontSize: '14px', color: '#475569' }}>
+                                      {bridge.id || 'No ID'}
+                                    </span>
+                                  </div>
+                                </div>
+                                
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+                                  <div>
+                                    <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>Coordinates</div>
+                                    <div style={{ fontSize: '13px', color: '#475569' }}>
+                                      {`${(normalized.latitude != null && !isNaN(normalized.latitude)) ? normalized.latitude.toFixed(6) : 'N/A'}, ${(normalized.longitude != null && !isNaN(normalized.longitude)) ? normalized.longitude.toFixed(6) : 'N/A'}`}
+                                    </div>
                                   </div>
                                 </div>
                               </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </div>
