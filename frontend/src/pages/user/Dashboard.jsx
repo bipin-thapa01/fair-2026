@@ -1,49 +1,68 @@
 import React, { useContext, useEffect, useState } from 'react'
 import { BridgesContext } from '../../contexts/BridgesContext'
-import { Line, Bar, Doughnut, Pie } from 'react-chartjs-2'
-import { 
-  Chart as ChartJS, 
-  CategoryScale, 
-  LinearScale, 
-  PointElement, 
-  LineElement, 
-  BarElement, 
-  ArcElement, 
-  Title, 
-  Tooltip, 
-  Legend,
-  RadialLinearScale,
-  Filler
-} from 'chart.js'
-
-ChartJS.register(
-  CategoryScale, 
-  LinearScale, 
-  PointElement, 
-  LineElement, 
-  BarElement, 
-  ArcElement, 
-  Title, 
-  Tooltip, 
-  Legend,
-  RadialLinearScale,
-  Filler
-)
 
 export default function Dashboard() {
   const { bridges, user } = useContext(BridgesContext)
+  const [userReports, setUserReports] = useState([])
   const [notifications, setNotifications] = useState([])
-  const [chartVisible, setChartVisible] = useState(false)
-  const [selectedTimeRange, setSelectedTimeRange] = useState('week')
 
   useEffect(() => {
-    setTimeout(() => setChartVisible(true), 250)
-    setNotifications([
-      { id: 1, text: 'Report #123 - Bagmati Bridge approved', time: '2 hours ago', type: 'success', icon: '✅' },
-      { id: 2, text: 'Report #124 - Kalanki Bridge declined', time: '1 day ago', type: 'error', icon: '❌' },
-      { id: 3, text: 'New bridge - Sundarijal added to monitoring', time: '3 days ago', type: 'info', icon: '🆕' },
-      { id: 4, text: 'Scheduled inspection - Tripureshwor Bridge', time: 'Tomorrow', type: 'warning', icon: '📅' }
-    ])
+    // Load user-specific reports
+    const loadUserReports = () => {
+      try {
+        const currentUser = JSON.parse(localStorage.getItem('bqi_user') || '{}')
+        const userEmail = currentUser.email
+        
+        if (!userEmail) return
+
+        const allReports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
+        const userSpecificReports = allReports.filter(report => report.userEmail === userEmail)
+        
+        setUserReports(userSpecificReports)
+
+        // Generate notifications from user reports
+        const userNotifications = []
+        
+        // Check for recent report updates
+        userSpecificReports.forEach(report => {
+          if (report.status === 'Approved') {
+            userNotifications.push({
+              id: report.id,
+              text: `Your report "${report.title}" was approved`,
+              time: report.adminActionDate ? new Date(report.adminActionDate).toLocaleDateString() : 'Recently',
+              type: 'success',
+              icon: '✅'
+            })
+          } else if (report.status === 'Declined') {
+            userNotifications.push({
+              id: report.id,
+              text: `Your report "${report.title}" was declined`,
+              time: report.adminActionDate ? new Date(report.adminActionDate).toLocaleDateString() : 'Recently',
+              type: 'error',
+              icon: '❌'
+            })
+          }
+        })
+
+        // Add pending reports notification
+        const pendingCount = userSpecificReports.filter(r => r.status === 'Pending').length
+        if (pendingCount > 0) {
+          userNotifications.push({
+            id: 'pending',
+            text: `You have ${pendingCount} report${pendingCount > 1 ? 's' : ''} pending review`,
+            time: 'Currently',
+            type: 'warning',
+            icon: '⏳'
+          })
+        }
+
+        setNotifications(userNotifications.slice(0, 4))
+      } catch (error) {
+        console.error('Error loading user reports:', error)
+      }
+    }
+
+    loadUserReports()
   }, [])
 
   const greeting = () => {
@@ -59,90 +78,33 @@ export default function Dashboard() {
     return name.charAt(0).toUpperCase() + name.slice(1)
   }
 
-  // Calculate statistics
-  const totalBridges = bridges.length
-  const pendingReports = bridges.filter(b => (b.bqi || 0) < 50).length
-  const goodBridges = bridges.filter(b => (b.bqi || 0) >= 70).length
-  const criticalBridges = bridges.filter(b => (b.bqi || 0) < 40).length
-  
-  // BQI score distribution
-  const buckets = { EXCELLENT: 0, GOOD: 0, FAIR: 0, POOR: 0, CRITICAL: 0 }
-  bridges.forEach(b => {
-    const bqi = b.bqi || 0
-    if (bqi >= 80) buckets.EXCELLENT++
-    else if (bqi >= 60) buckets.GOOD++
-    else if (bqi >= 40) buckets.FAIR++
-    else if (bqi >= 20) buckets.POOR++
-    else buckets.CRITICAL++
-  })
+  // Calculate user-specific statistics
+  const totalReports = userReports.length
+  const pendingReports = userReports.filter(r => r.status === 'Pending').length
+  const approvedReports = userReports.filter(r => r.status === 'Approved').length
+  const declinedReports = userReports.filter(r => r.status === 'Declined').length
 
-  // Status chart data
-  const statusChartData = {
-    labels: ['Excellent', 'Good', 'Fair', 'Poor', 'Critical'],
-    datasets: [{
-      label: 'Number of Bridges',
-      data: Object.values(buckets),
-      backgroundColor: [
-        'rgba(16, 185, 129, 0.8)',
-        'rgba(34, 197, 94, 0.8)',
-        'rgba(250, 204, 21, 0.8)',
-        'rgba(245, 158, 11, 0.8)',
-        'rgba(239, 68, 68, 0.8)'
-      ],
-      borderColor: [
-        '#10B981',
-        '#22C55E',
-        '#FACC15',
-        '#F59E0B',
-        '#EF4444'
-      ],
-      borderWidth: 2,
-      borderRadius: 8
-    }]
-  }
+  // Get unique bridges the user has reported on
+  const uniqueBridgeIds = new Set(userReports.map(r => r.bridgeId).filter(id => id))
+  const bridgesVisited = uniqueBridgeIds.size
 
-  // Line chart data for BQI trends
-  const lineChartData = {
-    labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
-    datasets: [
-      {
-        label: 'Average BQI Score',
-        data: [68, 72, 70, 75, 73, 78],
-        borderColor: '#3B82F6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        fill: true,
-        tension: 0.4
-      },
-      {
-        label: 'Critical Reports',
-        data: [5, 3, 4, 2, 3, 1],
-        borderColor: '#EF4444',
-        backgroundColor: 'rgba(239, 68, 68, 0.1)',
-        fill: true,
-        tension: 0.4
+  // Bridge health summary for user's reported bridges
+  const userBridgeHealth = {}
+  userReports.forEach(report => {
+    if (report.bridgeId) {
+      const bridge = bridges.find(b => b.id === report.bridgeId)
+      if (bridge && bridge.bqi) {
+        userBridgeHealth[report.bridgeId] = {
+          name: bridge.name || report.bridge,
+          bqi: bridge.bqi,
+          status: bridge.status || (bridge.bqi >= 80 ? 'EXCELLENT' : 
+                                  bridge.bqi >= 60 ? 'GOOD' : 
+                                  bridge.bqi >= 40 ? 'FAIR' : 
+                                  bridge.bqi >= 20 ? 'POOR' : 'CRITICAL')
+        }
       }
-    ]
-  }
-
-  // Doughnut chart data
-  const doughnutChartData = {
-    labels: ['Inspected', 'Pending', 'Overdue'],
-    datasets: [{
-      data: [65, 25, 10],
-      backgroundColor: [
-        'rgba(34, 197, 94, 0.8)',
-        'rgba(250, 204, 21, 0.8)',
-        'rgba(239, 68, 68, 0.8)'
-      ],
-      borderColor: [
-        '#22C55E',
-        '#FACC15',
-        '#EF4444'
-      ],
-      borderWidth: 2,
-      cutout: '70%'
-    }]
-  }
+    }
+  })
 
   const dailyTips = [
     '🔍 Inspect bridge joints regularly for cracks and wear.',
@@ -167,6 +129,14 @@ export default function Dashboard() {
       case 'info': return '#3B82F6'
       default: return '#6B7280'
     }
+  }
+
+  const getBQIColor = (bqi) => {
+    if (bqi >= 80) return '#10B981'
+    if (bqi >= 60) return '#22C55E'
+    if (bqi >= 40) return '#F59E0B'
+    if (bqi >= 20) return '#F97316'
+    return '#DC2626'
   }
 
   return (
@@ -218,26 +188,33 @@ export default function Dashboard() {
             display: 'flex',
             gap: '12px'
           }}>
-            <select
-              value={selectedTimeRange}
-              onChange={(e) => setSelectedTimeRange(e.target.value)}
+            <button
+              onClick={() => window.location.href = '/user/reports'}
               style={{
-                padding: '10px 16px',
-                border: '1px solid #E5E7EB',
+                padding: '10px 20px',
+                background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
+                color: 'white',
+                border: 'none',
                 borderRadius: '12px',
-                background: 'white',
                 fontSize: '14px',
-                fontWeight: '500',
-                color: '#374151',
+                fontWeight: '600',
                 cursor: 'pointer',
-                outline: 'none'
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                transition: 'all 0.3s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.transform = 'translateY(-2px)';
+                e.currentTarget.style.boxShadow = '0 4px 20px rgba(31, 111, 235, 0.3)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.transform = 'translateY(0)';
+                e.currentTarget.style.boxShadow = 'none';
               }}
             >
-              <option value="day">Today</option>
-              <option value="week">This Week</option>
-              <option value="month">This Month</option>
-              <option value="year">This Year</option>
-            </select>
+              📋 View My Reports
+            </button>
           </div>
         </div>
       </div>
@@ -251,36 +228,36 @@ export default function Dashboard() {
       }}>
         {[
           {
-            title: 'Total Bridges',
-            value: totalBridges,
-            icon: '🌉',
+            title: 'Total Reports',
+            value: totalReports,
+            icon: '📋',
             color: '#3B82F6',
-            change: '+2%',
-            desc: 'Monitored bridges'
+            change: 'Submitted',
+            desc: 'All your reports'
           },
           {
-            title: 'Good Condition',
-            value: goodBridges,
+            title: 'Pending Review',
+            value: pendingReports,
+            icon: '⏳',
+            color: '#F59E0B',
+            change: 'Awaiting',
+            desc: 'Awaiting admin review'
+          },
+          {
+            title: 'Approved',
+            value: approvedReports,
             icon: '✅',
             color: '#10B981',
-            change: '+5%',
-            desc: 'BQI ≥ 70'
+            change: 'Accepted',
+            desc: 'Approved reports'
           },
           {
-            title: 'Critical',
-            value: criticalBridges,
-            icon: '⚠️',
-            color: '#EF4444',
-            change: '-1%',
-            desc: 'Requires attention'
-          },
-          {
-            title: 'Pending Reports',
-            value: pendingReports,
-            icon: '📋',
-            color: '#F59E0B',
-            change: '+3',
-            desc: 'Awaiting review'
+            title: 'Bridges Visited',
+            value: bridgesVisited,
+            icon: '🌉',
+            color: '#8B5CF6',
+            change: 'Monitored',
+            desc: 'Unique bridges reported'
           }
         ].map((stat, index) => (
           <div
@@ -347,28 +324,28 @@ export default function Dashboard() {
             </div>
             
             <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
               fontSize: '13px',
               fontWeight: '500',
-              color: stat.change.startsWith('+') ? '#10B981' : '#EF4444'
+              color: stat.color,
+              padding: '6px 12px',
+              background: `${stat.color}10`,
+              borderRadius: '8px',
+              display: 'inline-block'
             }}>
-              <span>{stat.change}</span>
-              <span style={{ color: '#9CA3AF' }}>from last month</span>
+              {stat.change}
             </div>
           </div>
         ))}
       </div>
 
-      {/* Charts Section */}
+      {/* Main Content Grid */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '2fr 1fr',
         gap: '32px',
         marginBottom: '40px'
       }}>
-        {/* Main Chart */}
+        {/* Your Reported Bridges */}
         <div style={{
           background: 'white',
           borderRadius: '20px',
@@ -382,89 +359,131 @@ export default function Dashboard() {
             marginBottom: '24px'
           }}>
             <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1F2937' }}>
-              BQI Score Trends
+              Your Reported Bridges
             </h3>
-            <div style={{
-              display: 'flex',
-              gap: '8px',
-              fontSize: '12px'
+            <span style={{
+              fontSize: '12px',
+              fontWeight: '500',
+              color: '#6B7280',
+              background: '#F3F4F6',
+              padding: '4px 12px',
+              borderRadius: '12px'
             }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div style={{ width: '12px', height: '12px', background: '#3B82F6', borderRadius: '2px' }}></div>
-                <span>Avg BQI</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <div style={{ width: '12px', height: '12px', background: '#EF4444', borderRadius: '2px' }}></div>
-                <span>Critical</span>
-              </div>
-            </div>
+              {Object.keys(userBridgeHealth).length} Bridges
+            </span>
           </div>
           
-          <div style={{ height: '300px' }}>
-            <Line 
-              data={lineChartData} 
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                  legend: { display: false },
-                  tooltip: {
-                    mode: 'index',
-                    intersect: false,
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    titleColor: '#fff',
-                    bodyColor: '#fff'
-                  }
-                },
-                scales: {
-                  y: {
-                    beginAtZero: false,
-                    grid: { color: 'rgba(0, 0, 0, 0.05)' },
-                    ticks: { color: '#6B7280' }
-                  },
-                  x: {
-                    grid: { color: 'rgba(0, 0, 0, 0.05)' },
-                    ticks: { color: '#6B7280' }
-                  }
-                }
-              }} 
-            />
+          <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+            {Object.keys(userBridgeHealth).length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748B' }}>
+                <div style={{ fontSize: '48px', marginBottom: '16px' }}>🌉</div>
+                <p style={{ margin: '0 0 16px' }}>You haven't reported on any bridges yet</p>
+                <button
+                  onClick={() => window.location.href = '/user/reports'}
+                  style={{
+                    padding: '10px 20px',
+                    background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  Submit Your First Report
+                </button>
+              </div>
+            ) : (
+              Object.values(userBridgeHealth).map((bridge, index) => (
+                <div
+                  key={index}
+                  style={{
+                    padding: '20px',
+                    borderBottom: '1px solid #F3F4F6',
+                    transition: 'background 0.3s ease'
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = '#F9FAFB'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                    <div>
+                      <div style={{ fontSize: '16px', fontWeight: '600', color: '#1F2937', marginBottom: '4px' }}>
+                        {bridge.name}
+                      </div>
+                      <div style={{ fontSize: '14px', color: '#6B7280' }}>
+                        {bridge.status}
+                      </div>
+                    </div>
+                    <div style={{
+                      fontSize: '24px',
+                      fontWeight: '700',
+                      color: getBQIColor(bridge.bqi)
+                    }}>
+                      {bridge.bqi}
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <div style={{
+                      flex: 1,
+                      height: '8px',
+                      background: '#E5E7EB',
+                      borderRadius: '4px',
+                      overflow: 'hidden'
+                    }}>
+                      <div style={{
+                        width: `${bridge.bqi}%`,
+                        height: '100%',
+                        background: getBQIColor(bridge.bqi),
+                        borderRadius: '4px'
+                      }}></div>
+                    </div>
+                    <div style={{ fontSize: '12px', color: '#9CA3AF' }}>
+                      BQI Score
+                    </div>
+                  </div>
+                  
+                  <div style={{ display: 'flex', gap: '12px', marginTop: '16px' }}>
+                    <button
+                      onClick={() => window.location.href = `/maps?bridge=${bridge.name}`}
+                      style={{
+                        padding: '8px 16px',
+                        background: 'rgba(59, 130, 246, 0.1)',
+                        color: '#3B82F6',
+                        border: '1px solid rgba(59, 130, 246, 0.2)',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      View on Map
+                    </button>
+                    <button
+                      onClick={() => window.location.href = `/user/reports?bridge=${bridge.name}`}
+                      style={{
+                        padding: '8px 16px',
+                        background: 'rgba(16, 185, 129, 0.1)',
+                        color: '#10B981',
+                        border: '1px solid rgba(16, 185, 129, 0.2)',
+                        borderRadius: '8px',
+                        fontSize: '12px',
+                        fontWeight: '500',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      View Reports
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
-        {/* Side Cards */}
+        {/* Sidebar */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
-          {/* Doughnut Chart */}
-          <div style={{
-            background: 'white',
-            borderRadius: '20px',
-            padding: '24px',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
-          }}>
-            <h4 style={{ margin: '0 0 20px', fontSize: '16px', fontWeight: '600', color: '#1F2937' }}>
-              Inspection Status
-            </h4>
-            <div style={{ height: '200px', position: 'relative' }}>
-              <Doughnut 
-                data={doughnutChartData} 
-                options={{
-                  responsive: true,
-                  maintainAspectRatio: false,
-                  plugins: {
-                    legend: { 
-                      position: 'bottom',
-                      labels: { 
-                        padding: 20,
-                        usePointStyle: true,
-                        pointStyle: 'circle'
-                      }
-                    }
-                  }
-                }} 
-              />
-            </div>
-          </div>
-
           {/* Daily Tip */}
           <div style={{
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
@@ -500,6 +519,11 @@ export default function Dashboard() {
               {getRandomTip()}
             </p>
             <button
+              onClick={() => {
+                const newTip = getRandomTip()
+                const tipElement = document.querySelector('#daily-tip')
+                if (tipElement) tipElement.textContent = newTip
+              }}
               style={{
                 marginTop: '16px',
                 padding: '8px 16px',
@@ -523,86 +547,138 @@ export default function Dashboard() {
               Show Another Tip
             </button>
           </div>
+
+          {/* Quick Actions */}
+          <div style={{
+            background: 'white',
+            borderRadius: '20px',
+            padding: '24px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
+          }}>
+            <h4 style={{ margin: '0 0 20px', fontSize: '16px', fontWeight: '600', color: '#1F2937' }}>
+              Quick Actions
+            </h4>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button
+                onClick={() => window.location.href = '/user/reports?new=true'}
+                style={{
+                  padding: '12px 16px',
+                  background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  transition: 'transform 0.3s ease'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.transform = 'translateX(4px)'}
+                onMouseLeave={(e) => e.currentTarget.style.transform = 'translateX(0)'}
+              >
+                <span>+</span> Submit New Report
+              </button>
+              
+              <button
+                onClick={() => window.location.href = '/maps'}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(139, 92, 246, 0.1)',
+                  color: '#8B5CF6',
+                  border: '1px solid rgba(139, 92, 246, 0.2)',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(139, 92, 246, 0.2)';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(139, 92, 246, 0.1)';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <span>🗺️</span> View Bridge Map
+              </button>
+              
+              <button
+                onClick={() => window.location.href = '/user/tips'}
+                style={{
+                  padding: '12px 16px',
+                  background: 'rgba(245, 158, 11, 0.1)',
+                  color: '#F59E0B',
+                  border: '1px solid rgba(245, 158, 11, 0.2)',
+                  borderRadius: '12px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  transition: 'all 0.3s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'rgba(245, 158, 11, 0.2)';
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'rgba(245, 158, 11, 0.1)';
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
+                <span>📚</span> Safety Guidelines
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Bottom Section */}
+      {/* Notifications Section */}
       <div style={{
-        display: 'grid',
-        gridTemplateColumns: '1fr 1fr',
-        gap: '32px',
+        background: 'white',
+        borderRadius: '20px',
+        padding: '24px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
         marginBottom: '40px'
       }}>
-        {/* Bar Chart */}
         <div style={{
-          background: 'white',
-          borderRadius: '20px',
-          padding: '24px',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: '20px'
         }}>
-          <h4 style={{ margin: '0 0 20px', fontSize: '16px', fontWeight: '600', color: '#1F2937' }}>
-            Bridge Health Distribution
+          <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#1F2937' }}>
+            Recent Notifications
           </h4>
-          <div style={{ height: '300px' }}>
-            <Bar 
-              data={statusChartData} 
-              options={{
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                  legend: { display: false },
-                  tooltip: {
-                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-                    titleColor: '#fff',
-                    bodyColor: '#fff'
-                  }
-                },
-                scales: {
-                  y: {
-                    beginAtZero: true,
-                    grid: { color: 'rgba(0, 0, 0, 0.05)' },
-                    ticks: { color: '#6B7280' }
-                  },
-                  x: {
-                    grid: { display: false },
-                    ticks: { color: '#6B7280' }
-                  }
-                }
-              }} 
-            />
-          </div>
-        </div>
-
-        {/* Notifications */}
-        <div style={{
-          background: 'white',
-          borderRadius: '20px',
-          padding: '24px',
-          boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
-        }}>
-          <div style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '20px'
+          <span style={{
+            fontSize: '12px',
+            fontWeight: '500',
+            color: '#6B7280',
+            background: '#F3F4F6',
+            padding: '4px 12px',
+            borderRadius: '12px'
           }}>
-            <h4 style={{ margin: 0, fontSize: '16px', fontWeight: '600', color: '#1F2937' }}>
-              Recent Notifications
-            </h4>
-            <span style={{
-              fontSize: '12px',
-              fontWeight: '500',
-              color: '#6B7280',
-              background: '#F3F4F6',
-              padding: '4px 12px',
-              borderRadius: '12px'
-            }}>
-              {notifications.length} new
-            </span>
-          </div>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            {notifications.map(n => (
+            {notifications.length} new
+          </span>
+        </div>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {notifications.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748B' }}>
+              <div style={{ fontSize: '48px', marginBottom: '16px' }}>🔔</div>
+              <p>No notifications yet</p>
+            </div>
+          ) : (
+            notifications.map(n => (
               <div
                 key={n.id}
                 style={{
@@ -658,10 +734,13 @@ export default function Dashboard() {
                   </div>
                 </div>
               </div>
-            ))}
-          </div>
-          
+            ))
+          )}
+        </div>
+        
+        {notifications.length > 0 && (
           <button
+            onClick={() => window.location.href = '/user/reports'}
             style={{
               width: '100%',
               marginTop: '20px',
@@ -684,12 +763,46 @@ export default function Dashboard() {
               e.currentTarget.style.borderColor = '#E5E7EB';
             }}
           >
-            View All Notifications
+            View All Reports
           </button>
-        </div>
+        )}
       </div>
 
-     
+      {/* Report Status Summary */}
+      <div style={{
+        background: 'white',
+        borderRadius: '20px',
+        padding: '24px',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.08)'
+      }}>
+        <h4 style={{ margin: '0 0 20px', fontSize: '16px', fontWeight: '600', color: '#1F2937' }}>
+          Your Report Status Summary
+        </h4>
+        
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+          gap: '20px',
+          textAlign: 'center'
+        }}>
+          <div>
+            <div style={{ fontSize: '32px', fontWeight: '700', color: '#3B82F6' }}>{totalReports}</div>
+            <div style={{ fontSize: '14px', color: '#6B7280' }}>Total Reports</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '32px', fontWeight: '700', color: '#F59E0B' }}>{pendingReports}</div>
+            <div style={{ fontSize: '14px', color: '#6B7280' }}>Pending Review</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '32px', fontWeight: '700', color: '#10B981' }}>{approvedReports}</div>
+            <div style={{ fontSize: '14px', color: '#6B7280' }}>Approved</div>
+          </div>
+          <div>
+            <div style={{ fontSize: '32px', fontWeight: '700', color: '#DC2626' }}>{declinedReports}</div>
+            <div style={{ fontSize: '14px', color: '#6B7280' }}>Declined</div>
+          </div>
+        </div>
+      </div>
 
       {/* Styles */}
       <style>{`
@@ -709,11 +822,7 @@ export default function Dashboard() {
         }
         
         @media (max-width: 1024px) {
-          .charts-section {
-            grid-template-columns: 1fr;
-          }
-          
-          .bottom-section {
+          .main-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -727,10 +836,6 @@ export default function Dashboard() {
         @media (max-width: 480px) {
           .stats-grid {
             grid-template-columns: 1fr;
-          }
-          
-          .quick-actions {
-            flex-direction: column;
           }
         }
         

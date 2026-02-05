@@ -1,7 +1,71 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 export default function UserSidebar({ open = true }) {
+  const [userStats, setUserStats] = useState({
+    reportsSubmitted: 0,
+    pendingReview: 0,
+    bridgesVisited: 0
+  });
+
+  useEffect(() => {
+    // Load user stats from localStorage
+    const loadUserStats = () => {
+      try {
+        // Get current user
+        const currentUser = JSON.parse(localStorage.getItem('bqi_user') || '{}');
+        const userEmail = currentUser.email;
+        
+        if (!userEmail) {
+          setUserStats({
+            reportsSubmitted: 0,
+            pendingReview: 0,
+            bridgesVisited: 0
+          });
+          return;
+        }
+
+        // Get all reports
+        const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]');
+        
+        // Filter reports for current user
+        const userReports = reports.filter(r => r.userEmail === userEmail);
+        
+        // Get reports submitted count
+        const reportsSubmitted = userReports.length;
+        
+        // Get pending review count
+        const pendingReview = userReports.filter(r => r.status === 'Pending').length;
+        
+        // Get unique bridges visited by this user
+        const uniqueBridgeIds = new Set(userReports.map(r => r.bridgeId).filter(id => id));
+        const bridgesVisited = uniqueBridgeIds.size;
+
+        setUserStats({
+          reportsSubmitted,
+          pendingReview,
+          bridgesVisited
+        });
+      } catch (error) {
+        console.error('Error loading user stats:', error);
+      }
+    };
+
+    loadUserStats();
+
+    // Listen for changes in localStorage
+    const handleStorageChange = () => loadUserStats();
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Custom event for when reports are updated
+    window.addEventListener('bqi-data-updated', loadUserStats);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('bqi-data-updated', loadUserStats);
+    };
+  }, []);
+
   useEffect(()=>{
     try{
       if (open) document.body.classList.add('bqi-sidebar-open')
@@ -257,11 +321,41 @@ export default function UserSidebar({ open = true }) {
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {[
-              { label: 'Reports Submitted', value: '8', color: '#10B981' },
-              { label: 'Pending Review', value: '2', color: '#F59E0B' },
-              { label: 'Bridges Visited', value: '5', color: '#3B82F6' },
+              { 
+                label: 'Reports Submitted', 
+                value: userStats.reportsSubmitted, 
+                color: '#10B981',
+                link: '/user/reports'
+              },
+              { 
+                label: 'Pending Review', 
+                value: userStats.pendingReview, 
+                color: '#F59E0B',
+                link: '/user/reports?status=pending'
+              },
+              { 
+                label: 'Bridges Visited', 
+                value: userStats.bridgesVisited, 
+                color: '#3B82F6',
+                link: '/maps'
+              },
             ].map((stat, index) => (
-              <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Link
+                key={index}
+                to={stat.link}
+                style={{
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
                 <div style={{
                   width: '8px',
                   height: '8px',
@@ -284,7 +378,7 @@ export default function UserSidebar({ open = true }) {
                 }}>
                   {stat.value}
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>

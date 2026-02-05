@@ -25,9 +25,9 @@ export default function MapsPage(){
   return (
     <div style={{height:'100vh',display:'flex'}}>
       {user ? (
-        user.role === 'admin' ? <Sidebar open={asideOpen} /> : <UserSidebar open={asideOpen} />
+        (user.role || '').toString().toLowerCase() === 'admin' ? <Sidebar open={asideOpen} /> : <UserSidebar open={asideOpen} />
       ) : null}
-      <div style={{flex:1,position:'relative'}}>
+      <div style={{flex:1,position:'relative', transition: 'margin-left 0.3s ease', marginLeft: asideOpen ? '280px' : '0'}}>
         <Topbar onToggle={() => setAsideOpen(v => !v)} />
         <LeafletMap />
       </div>

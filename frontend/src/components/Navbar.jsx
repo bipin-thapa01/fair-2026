@@ -51,9 +51,13 @@ export default function Navbar() {
       .slice(0, 2)
   }
 
+  // Normalize role and helpers
+  const roleLower = (user?.role || '').toString().toLowerCase()
+  const isAdmin = roleLower === 'admin'
+
   // Get user role color
   const getUserRoleColor = () => {
-    switch(user?.role) {
+    switch(roleLower) {
       case 'admin': return '#8B5CF6'
       case 'government': return '#3B82F6'
       case 'inspector': return '#EC4899'
@@ -93,62 +97,64 @@ export default function Navbar() {
       }}>
         {/* Left: Brand Logo */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          <button 
-            className="mobile-toggle" 
-            onClick={() => { 
-              toggleMobile(); 
-              window.dispatchEvent(new CustomEvent('bqi-toggle-sidebar')) 
-            }} 
-            aria-label="Menu"
-            style={{
-              background: 'none',
-              border: 'none',
-              padding: '8px',
-              cursor: 'pointer',
-              display: 'none',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: '8px',
-              transition: 'all 0.2s'
-            }}
-            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(15, 118, 110, 0.1)'}
-            onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
-          >
-            <div style={{
-              width: '24px',
-              height: '24px',
-              position: 'relative',
-              display: 'flex',
-              flexDirection: 'column',
-              justifyContent: 'space-between',
-              alignItems: 'center'
-            }}>
-              <span style={{
-                width: '100%',
-                height: '2px',
-                background: mobileOpen ? '#0F766E' : '#1E293B',
-                transform: mobileOpen ? 'rotate(45deg) translate(6px, 6px)' : 'none',
-                transition: 'all 0.3s ease',
-                borderRadius: '1px'
-              }}></span>
-              <span style={{
-                width: mobileOpen ? '0' : '100%',
-                height: '2px',
-                background: '#1E293B',
-                opacity: mobileOpen ? 0 : 1,
-                transition: 'all 0.3s ease',
-                borderRadius: '1px'
-              }}></span>
-              <span style={{
-                width: '100%',
-                height: '2px',
-                background: mobileOpen ? '#0F766E' : '#1E293B',
-                transform: mobileOpen ? 'rotate(-45deg) translate(7px, -7px)' : 'none',
-                transition: 'all 0.3s ease',
-                borderRadius: '1px'
-              }}></span>
-            </div>
-          </button>
+          {user && (
+            <button 
+              className="mobile-toggle" 
+              onClick={() => { 
+                toggleMobile(); 
+                window.dispatchEvent(new CustomEvent('bqi-toggle-sidebar')) 
+              }} 
+              aria-label="Menu"
+              style={{
+                background: 'none',
+                border: 'none',
+                padding: '8px',
+                cursor: 'pointer',
+                display: 'none',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: '8px',
+                transition: 'all 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(15, 118, 110, 0.1)'}
+              onMouseLeave={(e) => e.currentTarget.style.background = 'none'}
+            >
+              <div style={{
+                width: '24px',
+                height: '24px',
+                position: 'relative',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between',
+                alignItems: 'center'
+              }}>
+                <span style={{
+                  width: '100%',
+                  height: '2px',
+                  background: mobileOpen ? '#0F766E' : '#1E293B',
+                  transform: mobileOpen ? 'rotate(45deg) translate(6px, 6px)' : 'none',
+                  transition: 'all 0.3s ease',
+                  borderRadius: '1px'
+                }}></span>
+                <span style={{
+                  width: mobileOpen ? '0' : '100%',
+                  height: '2px',
+                  background: '#1E293B',
+                  opacity: mobileOpen ? 0 : 1,
+                  transition: 'all 0.3s ease',
+                  borderRadius: '1px'
+                }}></span>
+                <span style={{
+                  width: '100%',
+                  height: '2px',
+                  background: mobileOpen ? '#0F766E' : '#1E293B',
+                  transform: mobileOpen ? 'rotate(-45deg) translate(7px, -7px)' : 'none',
+                  transition: 'all 0.3s ease',
+                  borderRadius: '1px'
+                }}></span>
+              </div>
+            </button>
+          )}
 
           <Link to="/" className="brand" style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{
@@ -196,11 +202,10 @@ export default function Navbar() {
 
         {/* Center: Navigation Links (Non-logged in users) */}
         {!user && (
-          <nav style={{ 
+          <nav className="nav-links" style={{ 
             display: 'flex', 
             alignItems: 'center', 
-            gap: '32px',
-            '@media (max-width: 768px)': { display: 'none' }
+            gap: '32px'
           }}>
             {[
               { path: '/', label: 'Home', icon: '🏠' },
@@ -255,7 +260,7 @@ export default function Navbar() {
         )}
 
         {/* Right: Auth/User Section */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+        <div className="auth-section" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
           {!user ? (
             <>
               <Link
@@ -342,7 +347,7 @@ export default function Navbar() {
                     fontWeight: '500',
                     textTransform: 'capitalize'
                   }}>
-                  {user.role.charAt(0).toUpperCase() + user.role.slice(1)}
+                  {user.role ? (user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase()) : ''}
                   </div>
                 </div>
                 <div style={{ 
@@ -403,9 +408,9 @@ export default function Navbar() {
                           color: getUserRoleColor(),
                           fontWeight: '500'
                         }}>
-                          {user.role === 'admin' ? '👑 Administrator' : 
-                           user.role === 'government' ? '🏛️ Government' : 
-                           user.role === 'inspector' ? '🔍 Inspector' : '👤 Public User'}
+                          {isAdmin ? '👑 Administrator' : 
+                           roleLower === 'government' ? '🏛️ Government' : 
+                           roleLower === 'inspector' ? '🔍 Inspector' : '👤 Public User'}
                         </div>
                       </div>
                     </div>
@@ -414,7 +419,7 @@ export default function Navbar() {
                   <div style={{ padding: '8px' }}>
                     <button
                       onClick={() => {
-                        navigate(user.role === 'admin' ? '/admin' : '/user')
+                        navigate(isAdmin ? '/admin' : '/user')
                         setUserMenuOpen(false)
                       }}
                       style={{
@@ -694,19 +699,19 @@ export default function Navbar() {
           button.mobile-toggle {
             display: flex !important;
           }
-          
-          nav[style*="display: flex; align-items: center; gap: 32px"] {
+
+          .nav-links {
             display: none !important;
           }
-          
-          div[style*="display: flex; align-items: center; gap: 16px"] {
+
+          .auth-section {
             gap: 12px !important;
           }
-          
+
           .brand > div {
             display: none !important;
           }
-          
+
           .brand > div:first-child {
             display: flex !important;
           }

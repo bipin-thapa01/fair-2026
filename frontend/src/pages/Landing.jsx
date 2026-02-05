@@ -114,6 +114,13 @@ export default function Landing(){
           .landing-video-wrapper { top: 140px; right: 24px; width: 48%; height: 360px }
         }
 
+        /* medium laptops (e.g. 1280x800) improve balance */
+        @media (max-width: 1366px) and (min-width: 1025px) {
+          .landing-video-wrapper { top: 140px; right: 32px; width: 42%; height: 380px }
+          .hero-title { font-size: 40px !important }
+          .hero-sub { font-size: 16px !important }
+        }
+
         @media (max-width: 768px) {
           .landing-video-wrapper { position: static; width: 100%; height: auto; margin-top: 18px; right: auto; top: auto }
           .landing-video-card { border-radius: 16px; height: auto }

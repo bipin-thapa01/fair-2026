@@ -47,127 +47,174 @@ function Toast({ msg, type }) {
   )
 }
 
-const initialReports = [
-  {id:'r1', bridge:'Bagmati Bridge', bridgeId:'BQI-001', summary:'Observed increased vibration near midspan, recommend detailed inspection.', status:'Pending', submitted:'2026-01-25 09:12', auditor:'Inspector A', priority:'High', category:'Vibration Analysis', estimatedCost: '15,000', estimatedTime: '2 weeks'},
-  {id:'r2', bridge:'Narayani Bridge', bridgeId:'BQI-002', summary:'Local scouring noticed at pier 3, water level rising. Immediate action required.', status:'Pending', submitted:'2026-01-26 14:03', auditor:'Inspector B', priority:'Critical', category:'Structural Integrity', estimatedCost: '45,000', estimatedTime: '4 weeks'},
-  {id:'r3', bridge:'Himal Viaduct', bridgeId:'BQI-003', summary:'Minor cracking on approach slab; monitor monthly. Low priority maintenance.', status:'Pending', submitted:'2026-01-28 08:22', auditor:'Inspector C', priority:'Low', category:'Maintenance', estimatedCost: '8,000', estimatedTime: '1 week'},
-  {id:'r4', bridge:'Koshi Bridge', bridgeId:'BQI-004', summary:'Corrosion detected on support beams. Requires cleaning and protective coating.', status:'Pending', submitted:'2026-01-29 11:45', auditor:'Inspector D', priority:'Medium', category:'Corrosion Control', estimatedCost: '25,000', estimatedTime: '3 weeks'},
-  {id:'r5', bridge:'Gandaki Bridge', bridgeId:'BQI-005', summary:'Deck drainage system clogged. Requires cleaning to prevent water damage.', status:'Pending', submitted:'2026-01-30 10:30', auditor:'Inspector E', priority:'Medium', category:'Drainage System', estimatedCost: '12,000', estimatedTime: '5 days'},
-]
+// Get reports from localStorage and filter out sample reports
+const getInitialReports = () => {
+  try {
+    const stored = localStorage.getItem('bqi_reports');
+    if (stored) {
+      const reports = JSON.parse(stored);
+      
+      // Filter out sample reports
+      const filteredReports = reports.filter(report => {
+        // Check for sample content patterns
+        const isSampleContent = 
+          report.title?.includes('sample') || 
+          report.description?.includes('sample') ||
+          report.description?.includes('gfgfgfg') ||
+          report.title?.includes('gfggfgf');
+        
+        // Check for old dates (sample reports are usually old)
+        if (report.submitted) {
+          const reportDate = new Date(report.submitted);
+          const today = new Date();
+          const isOldReport = reportDate.getTime() < today.getTime() - 86400000; // Older than 1 day
+          
+          // Keep only non-sample and recent reports
+          return !isSampleContent && !isOldReport;
+        }
+        
+        return !isSampleContent;
+      });
+      
+      // Ensure all IDs are strings
+      return filteredReports.map(report => ({
+        ...report,
+        id: typeof report.id === 'number' ? report.id.toString() : report.id
+      }));
+    }
+  } catch (error) {
+    console.error('Error loading reports from localStorage:', error);
+  }
+  
+  // Return empty array if no stored reports
+  return [];
+}
 
 export default function Reports() {
-  const [reports, setReports] = useState(initialReports)
-  const [asideOpen, setAsideOpen] = useState(false)
+  const [reports, setReports] = useState(getInitialReports);
+  const [asideOpen, setAsideOpen] = useState(false);
 
   useEffect(() => {
-    const handler = () => setAsideOpen(v => !v)
-    window.addEventListener('bqi-toggle-sidebar', handler)
-    return () => window.removeEventListener('bqi-toggle-sidebar', handler)
-  }, [])
-  const [toast, setToast] = useState(null)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [filterPriority, setFilterPriority] = useState('all')
-  const [filterStatus, setFilterStatus] = useState('all')
-  const [dateRange, setDateRange] = useState({
-    start: '',
-    end: ''
-  })
+    const handler = () => setAsideOpen(v => !v);
+    window.addEventListener('bqi-toggle-sidebar', handler);
+    return () => window.removeEventListener('bqi-toggle-sidebar', handler);
+  }, []);
 
-  useEffect(() => {
-    const fetchReports = async () => {
-      try {
-        const token = localStorage.getItem('bqi_token')
-        const response = await fetch('/api/reports/pending', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          setReports(data)
-        }
-      } catch (error) {
-        console.error('Error fetching reports:', error)
+  const [toast, setToast] = useState(null);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  // Load bridges from localStorage
+  const getBridgesList = () => {
+    try {
+      const bridges = localStorage.getItem('bqi_bridges');
+      if (bridges) {
+        return JSON.parse(bridges);
       }
+    } catch (error) {
+      console.error('Error loading bridges:', error);
     }
-    
-    fetchReports()
-  }, [])
+    return [];
+  };
+
+  // Save reports to localStorage whenever they change
+  useEffect(() => {
+    try {
+      localStorage.setItem('bqi_reports', JSON.stringify(reports));
+    } catch (error) {
+      console.error('Error saving reports to localStorage:', error);
+    }
+  }, [reports]);
 
   const notify = (msg, type = 'success') => {
-    setToast({ msg, type })
-    setTimeout(() => setToast(null), 3000)
-  }
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
-  const handleAction = async (id, action) => {
-    // Optimistic update
-    setReports(prev => prev.map(x => x.id === id ? { ...x, status: action } : x))
+  const handleAction = (id, action, comment = '') => {
+    // Find the report
+    const reportIndex = reports.findIndex(r => r.id === id);
+    if (reportIndex === -1) return;
     
-    try {
-      const token = localStorage.getItem('bqi_token')
-      const response = await fetch(`/api/reports/${id}/review`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          action: action.toLowerCase(),
-          comment: 'No comment provided' // Simplified - no comment modal
-        })
-      })
-
-      if (!response.ok) {
-        throw new Error('Failed to update report')
-      }
-
-      notify(`Report ${action.toLowerCase()} successfully`, 'success')
-      
-      // Remove from list after delay
-      setTimeout(() => {
-        setReports(prev => prev.filter(x => x.id !== id))
-      }, 600)
-      
-    } catch (error) {
-      notify('Failed to process report', 'error')
-      // Revert optimistic update
-      setReports(initialReports)
+    const updatedReport = { ...reports[reportIndex] };
+    
+    if (action === 'Approved') {
+      updatedReport.status = 'Approved';
+      updatedReport.adminActionDate = new Date().toISOString();
+      updatedReport.adminComment = comment || 'Report approved by administrator';
+    } else if (action === 'Declined') {
+      updatedReport.status = 'Declined';
+      updatedReport.adminActionDate = new Date().toISOString();
+      updatedReport.adminComment = comment || 'Report declined by administrator';
     }
-  }
+    
+    // Update the report in main storage
+    const newReports = [...reports];
+    newReports[reportIndex] = updatedReport;
+    setReports(newReports);
+    
+    notify(`Report ${action.toLowerCase()} successfully`, 'success');
+  };
 
   const filteredReports = reports.filter(report => {
     const matchesSearch = searchTerm === '' || 
-      report.bridge.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.summary.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      report.auditor.toLowerCase().includes(searchTerm.toLowerCase())
+      (report.bridge && report.bridge.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (report.summary && report.summary.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (report.auditor && report.auditor.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (report.title && report.title.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (report.userName && report.userName.toLowerCase().includes(searchTerm.toLowerCase())) ||
+      (report.userEmail && report.userEmail.toLowerCase().includes(searchTerm.toLowerCase()));
     
-    const matchesPriority = filterPriority === 'all' || report.priority === filterPriority
-    const matchesStatus = filterStatus === 'all' || report.status === filterStatus
+    const matchesStatus = filterStatus === 'all' || report.status === filterStatus;
     
-    return matchesSearch && matchesPriority && matchesStatus
-  })
+    return matchesSearch && matchesStatus;
+  });
 
-  const getPriorityColor = (priority) => {
-    switch(priority.toLowerCase()) {
-      case 'critical': return '#DC2626'
-      case 'high': return '#F97316'
-      case 'medium': return '#F59E0B'
-      case 'low': return '#10B981'
-      default: return '#64748B'
-    }
-  }
+  // Get bridge name
+  const getBridgeName = (bridgeId) => {
+    const bridges = getBridgesList();
+    const bridge = bridges.find(b => b.id === bridgeId);
+    return bridge ? bridge.name : bridgeId || 'Unknown Bridge';
+  };
 
-  const getPriorityIcon = (priority) => {
-    switch(priority.toLowerCase()) {
-      case 'critical': return '🚨'
-      case 'high': return '⚠️'
-      case 'medium': return '📋'
-      case 'low': return '📝'
-      default: return '📄'
+  // Helper to format date
+  const formatDate = (dateString) => {
+    if (!dateString) return 'N/A';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch (error) {
+      return dateString;
     }
-  }
+  };
+
+  // Refresh reports
+  const refreshReports = () => {
+    setReports(getInitialReports());
+    notify('Reports refreshed', 'success');
+  };
+
+  // Clean sample reports function
+  const cleanSampleReports = () => {
+    const currentReports = getInitialReports();
+    setReports(currentReports);
+    notify('Sample reports cleaned successfully', 'success');
+  };
+
+  // Delete a single report
+  const deleteReport = (id) => {
+    if (window.confirm('Are you sure you want to delete this report?')) {
+      const newReports = reports.filter(report => report.id !== id);
+      setReports(newReports);
+      notify('Report deleted successfully', 'success');
+    }
+  };
 
   return (
     <div className="page-full" style={{
@@ -214,6 +261,24 @@ export default function Reports() {
               alignItems: 'center',
               gap: '12px'
             }}>
+              <button
+                onClick={refreshReports}
+                style={{
+                  padding: '8px 16px',
+                  background: 'rgba(15, 118, 110, 0.1)',
+                  color: '#0F766E',
+                  border: '1px solid rgba(15, 118, 110, 0.2)',
+                  borderRadius: '8px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}
+              >
+                🔄 Refresh
+              </button>
               <span style={{
                 background: 'rgba(15, 118, 110, 0.1)',
                 color: '#0F766E',
@@ -222,7 +287,7 @@ export default function Reports() {
                 fontSize: '14px',
                 fontWeight: '600'
               }}>
-                {reports.length} Pending Reports
+                {reports.filter(r => r.status === 'Pending').length} Pending Reports
               </span>
             </div>
           </div>
@@ -268,7 +333,7 @@ export default function Reports() {
                     type="text"
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    placeholder="Search by bridge, auditor, or content..."
+                    placeholder="Search by bridge, auditor, user, or content..."
                     style={{
                       width: '100%',
                       padding: '12px 12px 12px 40px',
@@ -281,38 +346,6 @@ export default function Reports() {
                     }}
                   />
                 </div>
-              </div>
-
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#1E293B'
-                }}>
-                  Priority Filter
-                </label>
-                <select
-                  value={filterPriority}
-                  onChange={(e) => setFilterPriority(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    border: '1px solid #E2E8F0',
-                    background: '#F8FAFC',
-                    fontSize: '14px',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="all">All Priorities</option>
-                  <option value="Critical">Critical</option>
-                  <option value="High">High</option>
-                  <option value="Medium">Medium</option>
-                  <option value="Low">Low</option>
-                </select>
               </div>
 
               <div>
@@ -339,67 +372,11 @@ export default function Reports() {
                     cursor: 'pointer'
                   }}
                 >
+                  <option value="pending">Pending</option>
                   <option value="all">All Status</option>
-                  <option value="Pending">Pending</option>
                   <option value="Approved">Approved</option>
                   <option value="Declined">Declined</option>
                 </select>
-              </div>
-            </div>
-
-            {/* Date Range */}
-            <div style={{
-              display: 'flex',
-              gap: '12px',
-              alignItems: 'center',
-              paddingTop: '16px',
-              borderTop: '1px solid #E2E8F0'
-            }}>
-              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-                <div>
-                  <label style={{
-                    fontSize: '12px',
-                    color: '#64748B',
-                    marginBottom: '4px',
-                    display: 'block'
-                  }}>
-                    From Date
-                  </label>
-                  <input
-                    type="date"
-                    value={dateRange.start}
-                    onChange={(e) => setDateRange({...dateRange, start: e.target.value})}
-                    style={{
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      border: '1px solid #E2E8F0',
-                      fontSize: '14px',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
-                <div>
-                  <label style={{
-                    fontSize: '12px',
-                    color: '#64748B',
-                    marginBottom: '4px',
-                    display: 'block'
-                  }}>
-                    To Date
-                  </label>
-                  <input
-                    type="date"
-                    value={dateRange.end}
-                    onChange={(e) => setDateRange({...dateRange, end: e.target.value})}
-                    style={{
-                      padding: '8px 12px',
-                      borderRadius: '8px',
-                      border: '1px solid #E2E8F0',
-                      fontSize: '14px',
-                      outline: 'none'
-                    }}
-                  />
-                </div>
               </div>
             </div>
           </div>
@@ -411,199 +388,7 @@ export default function Reports() {
             gap: '16px',
             marginBottom: '24px'
           }}>
-            {filteredReports.map(report => (
-              <div 
-                key={report.id} 
-                className={`card ${report.status !== 'Pending' ? 'fading' : ''}`} 
-                style={{
-                  background: 'white',
-                  padding: '24px',
-                  borderRadius: '16px',
-                  boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-                  border: '1px solid #E2E8F0',
-                  transition: 'all 0.3s ease',
-                  transform: report.status !== 'Pending' ? 'translateX(100px)' : 'translateX(0)',
-                  opacity: report.status !== 'Pending' ? 0 : 1
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-                      <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: 'rgba(15, 118, 110, 0.1)',
-                        color: '#0F766E',
-                        padding: '4px 12px',
-                        borderRadius: '20px',
-                        fontSize: '13px',
-                        fontWeight: '600'
-                      }}>
-                        <span>🌉</span>
-                        {report.bridge}
-                      </div>
-                      <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: 'rgba(59, 130, 246, 0.1)',
-                        color: '#3B82F6',
-                        padding: '4px 12px',
-                        borderRadius: '20px',
-                        fontSize: '12px',
-                        fontWeight: '500'
-                      }}>
-                        {report.bridgeId}
-                      </div>
-                      <div style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        background: getPriorityColor(report.priority) + '20',
-                        color: getPriorityColor(report.priority),
-                        padding: '4px 12px',
-                        borderRadius: '20px',
-                        fontSize: '12px',
-                        fontWeight: '600'
-                      }}>
-                        {getPriorityIcon(report.priority)} {report.priority} Priority
-                      </div>
-                    </div>
-
-                    <div style={{ marginBottom: '16px' }}>
-                      <p style={{
-                        margin: 0,
-                        fontSize: '15px',
-                        color: '#475569',
-                        lineHeight: '1.6'
-                      }}>
-                        {report.summary}
-                      </p>
-                    </div>
-
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-                      gap: '16px',
-                      marginBottom: '16px'
-                    }}>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
-                          <span>👤</span> Auditor
-                        </div>
-                        <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
-                          {report.auditor}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
-                          <span>📋</span> Category
-                        </div>
-                        <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
-                          {report.category}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
-                          <span>💰</span> Estimated Cost
-                        </div>
-                        <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
-                          NPR {report.estimatedCost}
-                        </div>
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
-                          <span>⏱️</span> Estimated Time
-                        </div>
-                        <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
-                          {report.estimatedTime}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '16px',
-                      fontSize: '12px',
-                      color: '#64748B'
-                    }}>
-                      <span>📅 Submitted: {report.submitted}</span>
-                      <span>📝 Status: {report.status}</span>
-                    </div>
-                  </div>
-
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                    marginLeft: '24px'
-                  }}>
-                    <button
-                      onClick={() => handleAction(report.id, 'Approved')}
-                      style={{
-                        padding: '12px 24px',
-                        background: 'linear-gradient(135deg, #10B981, #059669)',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        transition: 'all 0.3s ease',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        minWidth: '120px',
-                        justifyContent: 'center'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.3)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = 'none';
-                      }}
-                    >
-                      <span>✓</span>
-                      Approve
-                    </button>
-                    <button
-                      onClick={() => handleAction(report.id, 'Declined')}
-                      style={{
-                        padding: '12px 24px',
-                        background: 'linear-gradient(135deg, #EF4444, #DC2626)',
-                        color: 'white',
-                        border: 'none',
-                        borderRadius: '8px',
-                        fontWeight: '600',
-                        cursor: 'pointer',
-                        transition: 'all 0.3s ease',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '8px',
-                        minWidth: '120px',
-                        justifyContent: 'center'
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                        e.currentTarget.style.boxShadow = '0 4px 20px rgba(239, 68, 68, 0.3)';
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'translateY(0)';
-                        e.currentTarget.style.boxShadow = 'none';
-                      }}
-                    >
-                      <span>✗</span>
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {filteredReports.length === 0 && (
+            {filteredReports.length === 0 ? (
               <div style={{
                 background: 'white',
                 padding: '48px 24px',
@@ -632,11 +417,266 @@ export default function Reports() {
                   color: '#64748B',
                   fontSize: '14px'
                 }}>
-                  {searchTerm || filterPriority !== 'all' || filterStatus !== 'all' 
+                  {searchTerm || filterStatus !== 'all' 
                     ? 'Try adjusting your search or filters'
-                    : 'All reports have been reviewed. Great work!'}
+                    : 'No reports have been submitted yet. Ask users to submit bridge inspection reports.'}
                 </p>
               </div>
+            ) : (
+              filteredReports
+                .filter(r => filterStatus === 'all' || r.status === filterStatus)
+                .sort((a, b) => new Date(b.submitted || b.timestamp) - new Date(a.submitted || a.timestamp))
+                .map(report => (
+                  <div 
+                    key={report.id} 
+                    className={`card ${report.status !== 'Pending' ? 'fading' : ''}`} 
+                    style={{
+                      background: 'white',
+                      padding: '24px',
+                      borderRadius: '16px',
+                      boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+                      border: '1px solid #E2E8F0',
+                      transition: 'all 0.3s ease',
+                      opacity: report.status !== 'Pending' ? 0.7 : 1
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px', flexWrap: 'wrap' }}>
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: 'rgba(15, 118, 110, 0.1)',
+                            color: '#0F766E',
+                            padding: '4px 12px',
+                            borderRadius: '20px',
+                            fontSize: '13px',
+                            fontWeight: '600'
+                          }}>
+                            <span>🌉</span>
+                            {getBridgeName(report.bridgeId) || report.bridge || 'Unknown Bridge'}
+                          </div>
+                          
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: report.status === 'Pending' ? 'rgba(245, 158, 11, 0.1)' : 
+                                       report.status === 'Approved' ? 'rgba(16, 185, 129, 0.1)' : 
+                                       'rgba(239, 68, 68, 0.1)',
+                            color: report.status === 'Pending' ? '#D97706' : 
+                                   report.status === 'Approved' ? '#059669' : '#DC2626',
+                            padding: '4px 12px',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: '600'
+                          }}>
+                            {report.status}
+                          </div>
+                          
+                          <div style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            background: 'rgba(59, 130, 246, 0.1)',
+                            color: '#3B82F6',
+                            padding: '4px 12px',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: '500'
+                          }}>
+                            <span>👤</span>
+                            {report.userName || report.auditor || 'Anonymous'}
+                          </div>
+                        </div>
+
+                        <div style={{ marginBottom: '16px' }}>
+                          <h4 style={{
+                            margin: '0 0 8px 0',
+                            fontSize: '16px',
+                            fontWeight: '600',
+                            color: '#1E293B'
+                          }}>
+                            {report.title || 'No title'}
+                          </h4>
+                          <p style={{
+                            margin: 0,
+                            fontSize: '15px',
+                            color: '#475569',
+                            lineHeight: '1.6'
+                          }}>
+                            {report.summary || report.description || 'No description provided.'}
+                          </p>
+                        </div>
+
+                        <div style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                          gap: '16px',
+                          marginBottom: '16px'
+                        }}>
+                          <div>
+                            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
+                              <span>📋</span> Category
+                            </div>
+                            <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
+                              {report.category || report.issueType || 'General'}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
+                              <span>📅</span> Submitted Date
+                            </div>
+                            <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
+                              {formatDate(report.submitted || report.timestamp)}
+                            </div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
+                              <span>📧</span> User Email
+                            </div>
+                            <div style={{ fontSize: '14px', fontWeight: '500', color: '#1E293B' }}>
+                              {report.userEmail || 'No email'}
+                            </div>
+                          </div>
+                          {report.adminActionDate && (
+                            <div>
+                              <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
+                                <span>✅</span> Action Date
+                              </div>
+                              <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
+                                {formatDate(report.adminActionDate)}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {report.adminComment && (
+                          <div style={{
+                            padding: '12px',
+                            background: '#F8FAFC',
+                            borderRadius: '8px',
+                            border: '1px solid #E2E8F0',
+                            marginBottom: '16px'
+                          }}>
+                            <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
+                              <span>💬</span> Admin Comment
+                            </div>
+                            <div style={{ fontSize: '14px', color: '#475569' }}>
+                              {report.adminComment}
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '16px',
+                          fontSize: '12px',
+                          color: '#64748B'
+                        }}>
+                          <span>🆔 Report ID: {report.id}</span>
+                        </div>
+                      </div>
+
+                      <div style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                        marginLeft: '24px'
+                      }}>
+                        {report.status === 'Pending' && (
+                          <>
+                            <button
+                              onClick={() => {
+                                const comment = prompt('Add a comment (optional):', '');
+                                handleAction(report.id, 'Approved', comment);
+                              }}
+                              style={{
+                                padding: '12px 24px',
+                                background: 'linear-gradient(135deg, #10B981, #059669)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                transition: 'all 0.3s ease',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                minWidth: '120px',
+                                justifyContent: 'center'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                                e.currentTarget.style.boxShadow = '0 4px 20px rgba(16, 185, 129, 0.3)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }}
+                            >
+                              <span>✓</span>
+                              Approve
+                            </button>
+                            <button
+                              onClick={() => {
+                                const comment = prompt('Add a comment (optional):', '');
+                                handleAction(report.id, 'Declined', comment);
+                              }}
+                              style={{
+                                padding: '12px 24px',
+                                background: 'linear-gradient(135deg, #EF4444, #DC2626)',
+                                color: 'white',
+                                border: 'none',
+                                borderRadius: '8px',
+                                fontWeight: '600',
+                                cursor: 'pointer',
+                                transition: 'all 0.3s ease',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                minWidth: '120px',
+                                justifyContent: 'center'
+                              }}
+                              onMouseEnter={(e) => {
+                                e.currentTarget.style.transform = 'translateY(-2px)';
+                                e.currentTarget.style.boxShadow = '0 4px 20px rgba(239, 68, 68, 0.3)';
+                              }}
+                              onMouseLeave={(e) => {
+                                e.currentTarget.style.transform = 'translateY(0)';
+                                e.currentTarget.style.boxShadow = 'none';
+                              }}
+                            >
+                              <span>✗</span>
+                              Decline
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => deleteReport(report.id)}
+                          style={{
+                            padding: '8px 16px',
+                            background: 'rgba(239, 68, 68, 0.1)',
+                            color: '#DC2626',
+                            border: '1px solid rgba(239, 68, 68, 0.2)',
+                            borderRadius: '8px',
+                            fontWeight: '500',
+                            cursor: 'pointer',
+                            fontSize: '14px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          🗑️ Delete
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))
             )}
           </div>
 
@@ -662,12 +702,16 @@ export default function Reports() {
               gap: '16px'
             }}>
               {[
-                { label: 'Total Pending', value: reports.length, icon: '📋', color: '#F59E0B' },
-                { label: 'Critical Priority', value: reports.filter(r => r.priority === 'Critical').length, icon: '🚨', color: '#DC2626' },
-                { label: 'High Priority', value: reports.filter(r => r.priority === 'High').length, icon: '⚠️', color: '#F97316' },
-                { label: 'Medium Priority', value: reports.filter(r => r.priority === 'Medium').length, icon: '📋', color: '#F59E0B' },
-                { label: 'Low Priority', value: reports.filter(r => r.priority === 'Low').length, icon: '📝', color: '#10B981' },
-                { label: 'Today\'s Reports', value: reports.filter(r => r.submitted.includes('2026-01-30')).length, icon: '📅', color: '#3B82F6' },
+                { label: 'Total Pending', value: reports.filter(r => r.status === 'Pending').length, icon: '📋', color: '#F59E0B' },
+                { label: 'Total Approved', value: reports.filter(r => r.status === 'Approved').length, icon: '✅', color: '#10B981' },
+                { label: 'Total Declined', value: reports.filter(r => r.status === 'Declined').length, icon: '❌', color: '#DC2626' },
+                { label: 'Total Reports', value: reports.length, icon: '📊', color: '#3B82F6' },
+                { label: 'Today\'s Reports', value: reports.filter(r => {
+                  const today = new Date().toISOString().split('T')[0];
+                  const reportDate = r.submitted ? new Date(r.submitted).toISOString().split('T')[0] : 
+                                    r.date ? new Date(r.date).toISOString().split('T')[0] : '';
+                  return reportDate === today;
+                }).length, icon: '📅', color: '#8B5CF6' },
               ].map((stat, index) => (
                 <div key={index} style={{
                   background: stat.color + '10',
@@ -761,6 +805,7 @@ export default function Reports() {
             margin-top: 16px !important;
             flex-direction: row !important;
             justify-content: center !important;
+            flex-wrap: wrap;
           }
         }
         

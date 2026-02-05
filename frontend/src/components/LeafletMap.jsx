@@ -1,21 +1,15 @@
-﻿import React, { useEffect, useRef, useState } from 'react'
+﻿import React, { useEffect, useRef, useState, useContext } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import 'leaflet.markercluster'
-import { classification } from '../utils/bqi'
+import { BridgesContext } from '../contexts/BridgesContext'
 import { useNavigate } from 'react-router-dom'
+import api from '../lib/api'
 
-function emojiForScore(s) {
-  if (s >= 80) return '😀'
-  if (s >= 60) return '🙂'
-  if (s >= 40) return '😐'
-  if (s >= 20) return '🙁'
-  return '😢'
-}
-
-const NAVBAR_HEIGHT = 64
+// Import BQI utilities
+import { getColorForBQI, getStatusFromBQI } from '../lib/bqiCalculator'
 
 // Helper function to lighten hex color
 function lighten(hex, amt) {
@@ -44,30 +38,36 @@ const hexToRgba = (hex, a = 0.5) => {
   } catch (e) { return hex }
 }
 
-// Bridge data with dates
-const PROVIDED_BRIDGES = [
-  { name: "Sundarijal Bridge", lat: 27.8015, lon: 85.3912, bqi: 82, created: "2023-01-15", updated: "2024-03-10" },
-  { name: "Kalanki Bridge", lat: 27.6939, lon: 85.2815, bqi: 76, created: "2022-11-20", updated: "2024-02-28" },
-  { name: "Koteshwor Bridge", lat: 27.6789, lon: 85.3498, bqi: 61, created: "2023-03-05", updated: "2024-03-01" },
-  { name: "Balaju Bridge", lat: 27.7321, lon: 85.3014, bqi: 55, created: "2022-09-12", updated: "2024-02-15" },
-  { name: "Chabahil Bridge", lat: 27.7179, lon: 85.3490, bqi: 44, created: "2023-02-18", updated: "2024-02-25" },
-  { name: "Teku Bridge", lat: 27.6932, lon: 85.3091, bqi: 38, created: "2022-12-05", updated: "2024-03-05" },
-  { name: "Tripureshwor Bridge", lat: 27.6938, lon: 85.3175, bqi: 69, created: "2023-01-30", updated: "2024-02-20" },
-  { name: "Pulchowk Bridge", lat: 27.6725, lon: 85.3251, bqi: 23, created: "2022-10-22", updated: "2024-03-08" },
-  { name: "Thapathali Bridge", lat: 27.6998, lon: 85.3118, bqi: 90, created: "2023-04-12", updated: "2024-02-28" },
-  { name: "Kantipath Bridge", lat: 27.7046, lon: 85.3170, bqi: 33, created: "2022-08-15", updated: "2024-03-03" },
-  { name: "Bagmati Bridge", lat: 27.6780, lon: 85.3206, bqi: 47, created: "2023-02-28", updated: "2024-02-18" }
-].map((b, i) => ({
-  id: 'b-' + (i + 1),
-  name: b.name,
-  lat: b.lat,
-  lng: b.lon,
-  bqi: b.bqi,
-  createdAt: b.created + 'T00:00:00.000Z',
-  updatedAt: b.updated + 'T00:00:00.000Z'
-}))
+// Fix for your API's swapped coordinates
+const normalizeLatLng = (src) => {
+  const lat = src?.longitude  // This is actually latitude
+  const lng = src?.latitude   // This is actually longitude
+  
+  return { 
+    latitude: lat !== undefined && lat !== '' ? Number(lat) : null,
+    longitude: lng !== undefined && lng !== '' ? Number(lng) : null
+  }
+}
+
+// Get BQI score from bridge data (prioritizes bridge.bqi, falls back to status)
+const getBQIFromBridge = (bridge) => {
+  // If bridge has bqi field, use it
+  if (bridge.bqi !== undefined && bridge.bqi !== null) {
+    return bridge.bqi;
+  }
+  
+  // Fallback to status-based BQI
+  const statusStr = (bridge.status || '').toString().toUpperCase();
+  if (statusStr === 'EXCELLENT') return 90;
+  if (statusStr === 'GOOD') return 75;
+  if (statusStr === 'FAIR') return 55;
+  if (statusStr === 'POOR') return 35;
+  if (statusStr === 'CRITICAL') return 10;
+  return 60;
+};
 
 export default function LeafletMap() {
+  const { bridges = [], refreshBridges, user } = useContext(BridgesContext)
   const mapRef = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef(null)
@@ -75,201 +75,286 @@ export default function LeafletMap() {
 
   const [coords, setCoords] = useState({ lat: 27.7172, lng: 85.3240, zoom: 13 })
   const [query, setQuery] = useState(() => localStorage.getItem('bqi_query') || '')
-  const [healthFilter, setHealthFilter] = useState(() => localStorage.getItem('bqi_health') || 'all')
+  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('bqi_status') || 'all')
   const [showReportForm, setShowReportForm] = useState(false)
   const [selectedBridge, setSelectedBridge] = useState(null)
   const [isFilterExpanded, setIsFilterExpanded] = useState(false)
-  const [currentUser, setCurrentUser] = useState(null)
-  const [sidebarOffset, setSidebarOffset] = useState(20)
+  const [isLoading, setIsLoading] = useState(false)
+  const [visibleBridgesCount, setVisibleBridgesCount] = useState(0)
+  const [lastUpdateTime, setLastUpdateTime] = useState(null)
 
-  // Get current user on component mount
+  const currentRoleLower = (user?.role || '').toString().toLowerCase()
+  const currentIsAdmin = currentRoleLower === 'admin'
+
+  // Debug: Check context
   useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('bqi_user') || 'null')
-    setCurrentUser(user)
-  }, [])
+    console.log('Map Component - Bridges Context:', {
+      bridgesCount: bridges?.length,
+      bridgesWithBQI: bridges?.filter(b => b.bqi !== undefined).length,
+      bridgesSample: bridges?.slice(0, 2).map(b => ({ name: b.name, bqi: b.bqi, status: b.status }))
+    })
+  }, [bridges])
 
-  // adjust overlay offset when sidebar toggles or window resizes
-  useEffect(() => {
-    const computeOffset = () => {
-      try {
-        const has = document.body.classList.contains('bqi-sidebar-open')
-        if (has && window.innerWidth >= 1024) setSidebarOffset(20 + 280)
-        else setSidebarOffset(20)
-      } catch (e) { setSidebarOffset(20) }
-    }
-    computeOffset()
-    window.addEventListener('resize', computeOffset)
-    window.addEventListener('bqi-sidebar-changed', computeOffset)
-    return () => { window.removeEventListener('resize', computeOffset); window.removeEventListener('bqi-sidebar-changed', computeOffset) }
-  }, [])
-
-  // Function to create marker icon based on BQI score
-  const makeIcon = (bqi) => {
-    // Determine color based on BQI score following the rules
-    let color
-    if (bqi >= 80) color = '#2ecc71'        // Green
-    else if (bqi >= 60) color = '#3498db'   // Blue
-    else if (bqi >= 40) color = '#f1c40f'   // Yellow
-    else if (bqi >= 20) color = '#e67e22'   // Orange
-    else color = '#e74c3c'                  // Red
+  // Function to create marker icon based on BQI
+  const makeIcon = (bridge) => {
+    const bqi = getBQIFromBridge(bridge)
+    const color = getColorForBQI(bqi)
     
     const light = lighten(color, 0.35)
     const shadow1 = hexToRgba(color, 0.55)
     const shadow2 = hexToRgba(color, 0.28)
     
+    // Add BQI number inside marker
     const html = `
       <div class="glow-marker" 
            style="background:radial-gradient(circle at 30% 30%, ${light}, ${color});
                   box-shadow: 0 0 12px ${shadow1}, 0 0 24px ${shadow2};
-                  border: 2px solid rgba(255,255,255,0.8)">
+                  border: 2px solid rgba(255,255,255,0.8);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-weight: bold;
+                  font-size: 11px;
+                  color: white;
+                  text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
+        ${Math.round(bqi)}
       </div>
     `
     
     return L.divIcon({
       className: 'bridge-marker',
       html,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
     })
   }
 
-  // Function to create popup content - UPDATED: Hide submit report for admin
+  // Function to create popup content
   const createPopupContent = (b) => {
-    const cls = classification(b.bqi ?? 0)
-    const status = cls.label === 'Safe' ? 'Good' : cls.label
-    const emoji = emojiForScore(b.bqi || 0)
-    const meterWidth = Math.max(4, Math.min(100, b.bqi || 0))
-    
-    // Format dates
-    const formatDate = (dateString) => {
-      try {
-        return new Date(dateString).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        })
-      } catch {
-        return 'N/A'
-      }
+    const n = normalizeLatLng(b)
+    const bqi = getBQIFromBridge(b)
+    const status = getStatusFromBQI(bqi)
+    const lat = n.latitude
+    const lng = n.longitude
+
+    // Get last update time
+    let lastUpdateText = ''
+    if (b.updatedAt) {
+      const updateTime = new Date(b.updatedAt)
+      lastUpdateText = `Last updated: ${updateTime.toLocaleDateString()} ${updateTime.toLocaleTimeString()}`
     }
-    
-    const createdDate = formatDate(b.createdAt)
-    const updatedDate = formatDate(b.updatedAt)
-    
-    // Check if current user is admin
-    const isAdmin = currentUser && currentUser.role === 'admin'
-    
+
     return `
-      <div style="min-width:260px;font-family:Inter,Arial;padding:8px">
-        <div style="font-weight:700;margin-bottom:8px;font-size:16px;color:#333">${b.name}</div>
+      <div style="min-width:280px;font-family:Inter,Arial;padding:16px">
+        <div style="font-weight:700;margin-bottom:10px;font-size:18px;color:#222">${b.name}</div>
         
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;color:#666">
-            <div style="font-weight:500;margin-bottom:2px">Location</div>
-            <div>${b.lat.toFixed(4)}, ${b.lng.toFixed(4)}</div>
+        <!-- BQI Score Display -->
+        <div style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <div style="font-size:14px;color:#444">
+              <strong>BQI Score:</strong>
+            </div>
+            <div style="
+              font-size:18px;
+              font-weight:700;
+              color:${getColorForBQI(bqi)};
+              background:${getColorForBQI(bqi)}20;
+              padding:4px 12px;
+              border-radius:20px;
+              border: 2px solid ${getColorForBQI(bqi)}40;
+            ">
+              ${bqi}/100
+            </div>
           </div>
-          
-          <div style="font-size:12px;color:#666">
-            <div style="font-weight:500;margin-bottom:2px">Current BQI</div>
-            <div style="font-weight:700;color:#333">${b.bqi ?? '—'}</div>
+          <div style="font-size:13px;color:#666">
+            <strong>Status:</strong> <span style="color:${getColorForBQI(bqi)};font-weight:500">${status}</span>
+          </div>
+          ${lastUpdateText ? `<div style="font-size:11px;color:#888;margin-top:4px">${lastUpdateText}</div>` : ''}
+        </div>
+        
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;font-size:12px;color:#555">
+          <div><strong>ID:</strong> ${b.id}</div>
+          <div><strong>Coordinates:</strong> ${lat?.toFixed(5) || '—'}, ${lng?.toFixed(5) || '—'}</div>
+          <div style="font-size:11px;color:#888;font-style:italic">
+            API fields: longitude=${b.longitude?.toFixed(5)}, latitude=${b.latitude?.toFixed(5)}
           </div>
         </div>
         
-        <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <div style="font-size:12px;color:#666">
-              <div style="font-weight:500;margin-bottom:2px">Health Status</div>
-              <div style="font-weight:600;color:${cls.color}">${status}</div>
-            </div>
-            
-            <div style="font-size:12px;color:#666">
-              <div style="font-weight:500;margin-bottom:2px">Score Meter</div>
-              <div style="font-size:20px">${emoji}</div>
-            </div>
-          </div>
-          
-          <div style="background:#e9ecef;border-radius:6px;height:8px;overflow:hidden;margin-bottom:8px">
-            <div style="width:${meterWidth}%;height:100%;background:${cls.color};transition:width 0.3s"></div>
-          </div>
-          
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:#888">
-            <span>Created: ${createdDate}</span>
-            <span>Updated: ${updatedDate}</span>
-          </div>
+        <div style="display:flex;gap:8px">
+          <button id="view-details" data-bridge-id="${b.id}" style="flex:1;padding:10px 14px;border-radius:8px;border:none;background:linear-gradient(135deg,#0F766E,#3B82F6);color:white;cursor:pointer;font-size:13px;font-weight:500">View Details</button>
+          ${!currentIsAdmin ? `<button id="submit-report-btn" data-bridge-id="${b.id}" style="flex:1;padding:10px 14px;border-radius:8px;border:1px solid #e6edf8;background:linear-gradient(90deg,#f8fbff,#fff);cursor:pointer;font-size:13px;font-weight:500">Report Issue</button>` : ''}
         </div>
         
-        ${!isAdmin ? `
-          <button id="submit-report-btn" 
-                  data-bridge-id="${b.id}"
-                  data-bridge-name="${b.name}"
-                  style="width:100%;background:linear-gradient(90deg,#1f6feb,#3fb0ff);
-                         border:none;color:#fff;padding:10px 16px;border-radius:8px;
-                         cursor:pointer;font-weight:500;font-size:14px;transition:all 0.2s">
-            Submit Report
-          </button>
-        ` : `
-          <div style="
-            width:100%;
-            background:linear-gradient(90deg,#f8f9fa,#e9ecef);
-            border:none;
-            color:#6c757d;
-            padding:10px 16px;
-            border-radius:8px;
-            font-weight:500;
-            font-size:14px;
-            text-align:center;
-            border:1px solid #dee2e6;
-          ">
-            <span style="display:inline-block;margin-right:8px">👑</span>
-            Admin Mode - View Only
+        <!-- BQI Calculation Info -->
+        <div style="margin-top:12px;padding:8px;background:#f8f9fa;border-radius:6px;border-left:3px solid ${getColorForBQI(bqi)};">
+          <div style="font-size:10px;color:#666;font-weight:500">BQI Formula</div>
+          <div style="font-size:9px;color:#888;font-family:monospace;">
+            BQI = 100 × [0.45×(1−S) + 0.40×(1−V) + 0.15×(1−T)]
           </div>
-        `}
+        </div>
       </div>
     `
   }
 
-  // Handle report form submission
-  const handleSubmitReport = (e) => {
-    e.preventDefault()
+ // Update the useEffect that logs bridge context
+useEffect(() => {
+  console.log('Map Component - Bridges Context:', {
+    bridgesCount: bridges?.length || 0,
+    bridgesWithBQI: bridges?.filter(b => b.bqi !== undefined).length || 0,
+    bridgesSample: bridges?.slice(0, 3).map(b => ({ 
+      name: b.name, 
+      bqi: b.bqi, 
+      status: b.status,
+      id: b.id 
+    })) || []
+  });
+  
+  // Check if bridges are loading from API or using fallback
+  if (bridges && bridges.length > 0) {
+    const firstBridge = bridges[0];
+    console.log('First bridge details:', {
+      name: firstBridge.name,
+      id: firstBridge.id,
+      hasBQI: firstBridge.bqi !== undefined,
+      bqi: firstBridge.bqi,
+      coordinates: `Lat: ${firstBridge.latitude}, Lng: ${firstBridge.longitude}`
+    });
+  }
+}, [bridges]);
+
+// Update the updateMapMarkers function to use bridges from context
+const updateMapMarkers = () => {
+  const map = mapRef.current;
+  const cluster = markersRef.current;
+  
+  if (!map || !cluster) return;
+  
+  try {
+    cluster.clearLayers();
+  } catch (e) {
+    console.error('Failed to clear cluster layers:', e);
+  }
+  
+  // Use bridges from context - they should now have BQI
+  let bridgesToDisplay = bridges || [];
+  
+  console.log('Bridges to display:', bridgesToDisplay.length, 'with BQI:', 
+    bridgesToDisplay.filter(b => b.bqi !== undefined).length);
+  
+  // Only use fallback if REALLY no bridges
+  if (bridgesToDisplay.length === 0) {
+    console.warn('No bridges from context, checking if loading...');
+    // Don't immediately use mock data - wait a bit
+    return;
+  }
     
-    const formData = new FormData(e.target)
-    const reportData = {
-      id: Date.now(),
-      bridgeId: selectedBridge.id,
-      bridgeName: selectedBridge.name,
-      issueType: formData.get('issueType'),
-      title: formData.get('title'),
-      description: formData.get('description'),
-      timestamp: new Date().toISOString(),
-      status: 'submitted'
+    const filteredBridges = bridgesToDisplay.filter(b => {
+      // Search filter
+      if (query && !b.name?.toLowerCase().includes(query.toLowerCase())) {
+        return false
+      }
+      
+      // Status filter
+      if (statusFilter !== 'all') {
+        const bridgeStatus = getStatusFromBQI(getBQIFromBridge(b)).toLowerCase()
+        return bridgeStatus === statusFilter.toLowerCase()
+      }
+      
+      return true
+    })
+    
+    let validBridgesCount = 0
+    
+    filteredBridges.forEach(b => {
+      // Use normalized coordinates (swap longitude/latitude)
+      const n = normalizeLatLng(b)
+      let lat = n.latitude
+      let lng = n.longitude
+      
+      // Skip bridges with invalid coordinates
+      if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+        console.warn(`Invalid coordinates for bridge ${b.id}:`, lat, lng)
+        return
+      }
+      
+      // Check if coordinates are valid for Nepal
+      const isLatValid = lat >= 26.3 && lat <= 30.5
+      const isLngValid = lng >= 80.0 && lng <= 88.3
+      
+      if (!isLatValid || !isLngValid) {
+        // Try the original (unswapped) coordinates as a fallback
+        const originalLat = b.latitude
+        const originalLng = b.longitude
+        
+        if (originalLat >= 26.3 && originalLat <= 30.5 && 
+            originalLng >= 80.0 && originalLng <= 88.3) {
+          lat = originalLat
+          lng = originalLng
+        } else {
+          return
+        }
+      }
+      
+      validBridgesCount++
+      const icon = makeIcon(b)
+      const marker = L.marker([lat, lng], { icon, title: b.name })
+
+      marker.bindPopup(createPopupContent(b))
+
+      // Handle popup events
+      marker.on('popupopen', (e) => {
+        const popupEl = e.popup.getElement()
+        const submitBtn = popupEl.querySelector('#submit-report-btn')
+        const viewDetailsBtn = popupEl.querySelector('#view-details')
+
+        if (viewDetailsBtn) {
+          viewDetailsBtn.onclick = () => {
+            navigate(`/bridges/${b.id}`)
+          }
+        }
+
+        if (submitBtn && !currentIsAdmin) {
+          submitBtn.onclick = (event) => {
+            event.preventDefault()
+            if (!user) {
+              navigate('/login')
+              return
+            }
+
+            if (mapRef.current) mapRef.current.closePopup()
+            setSelectedBridge(b)
+            setShowReportForm(true)
+          }
+        }
+      })
+
+      cluster.addLayer(marker)
+    })
+    
+    setVisibleBridgesCount(validBridgesCount)
+    console.log(`Map - Added ${validBridgesCount} markers with BQI`)
+    
+    if (map.hasLayer(cluster)) {
+      map.removeLayer(cluster)
+      map.addLayer(cluster)
     }
     
-    // Save to localStorage
-    const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
-    reports.push(reportData)
-    localStorage.setItem('bqi_reports', JSON.stringify(reports))
+    // If we have bridges, fit bounds to show all markers
+    if (validBridgesCount > 0 && cluster.getLayers().length > 0) {
+      try {
+        const bounds = cluster.getBounds()
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [50, 50] })
+        }
+      } catch (e) {
+        console.error('Error fitting bounds:', e)
+      }
+    } else {
+      console.warn('No valid markers to display')
+    }
     
-    // Show success message
-    setShowReportForm('success')
-    
-    // Reset after 3 seconds
-    setTimeout(() => {
-      setShowReportForm(false)
-      setSelectedBridge(null)
-    }, 3000)
-  }
-
-  const saveReport = (reportData) => {
-    const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
-    reports.push(reportData)
-    localStorage.setItem('bqi_reports', JSON.stringify(reports))
-    
-    setShowReportForm('success')
-    
-    setTimeout(() => {
-      setShowReportForm(false)
-      setSelectedBridge(null)
-    }, 3000)
+    // Set last update time
+    setLastUpdateTime(new Date().toISOString())
   }
 
   // Initialize map
@@ -288,69 +373,70 @@ export default function LeafletMap() {
       delete window._leaflet_maps[cid]
     }
     
+    // Initialize map with Nepal bounds
     const map = L.map(container, {
       center: [27.7172, 85.3240],
-      zoom: 13,
+      zoom: 8,
       minZoom: 6,
-      maxBounds: [[26.3, 80.0], [30.5, 88.3]]
+      maxZoom: 18,
+      maxBounds: [[26.3, 80.0], [30.5, 88.3]], // Nepal bounds
+      maxBoundsViscosity: 1.0
     })
     
     mapRef.current = map
     window._leaflet_maps[cid] = map
     
+    // Add OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19
     }).addTo(map)
     
+    // Initialize marker cluster
     const markerCluster = L.markerClusterGroup({
       chunkedLoading: true,
       showCoverageOnHover: false,
-      maxClusterRadius: 50
+      maxClusterRadius: 50,
+      spiderfyOnMaxZoom: true,
+      disableClusteringAtZoom: 15,
+      iconCreateFunction: function(cluster) {
+        const childMarkers = cluster.getAllChildMarkers()
+        const bqis = childMarkers.map(marker => {
+          const bridge = bridges.find(b => b.name === marker.options.title)
+          return bridge ? getBQIFromBridge(bridge) : 60
+        })
+        const avgBqi = Math.round(bqis.reduce((a, b) => a + b, 0) / bqis.length)
+        const color = getColorForBQI(avgBqi)
+        
+        return L.divIcon({
+          html: `<div style="
+            background: ${color};
+            color: white;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            border: 3px solid white;
+            box-shadow: 0 0 10px rgba(0,0,0,0.3);
+          ">${cluster.getChildCount()}<br/><span style="font-size:9px">BQI:${avgBqi}</span></div>`,
+          className: 'cluster-marker',
+          iconSize: L.point(40, 40)
+        })
+      }
     })
     
     markersRef.current = markerCluster
     
-    PROVIDED_BRIDGES.forEach(b => {
-      const icon = makeIcon(b.bqi)
-      const marker = L.marker([b.lat, b.lng], { icon, title: b.name })
-      
-      marker.bindPopup(createPopupContent(b))
-      
-      marker.on('popupopen', (e) => {
-        const popupEl = e.popup.getElement()
-        const submitBtn = popupEl.querySelector('#submit-report-btn')
-        
-        if (submitBtn) {
-          submitBtn.addEventListener('click', (event) => {
-            event.preventDefault()
-            const bridgeId = submitBtn.getAttribute('data-bridge-id')
-            const bridgeName = submitBtn.getAttribute('data-bridge-name')
-            const bridge = PROVIDED_BRIDGES.find(br => br.id === bridgeId)
-            
-            const user = JSON.parse(localStorage.getItem('bqi_user') || 'null')
-            if (!user) {
-              navigate('/login')
-              return
-            }
-            
-            // Check if user is admin - should not happen since button won't show for admin
-            if (user.role === 'admin') {
-              return
-            }
-            
-            map.closePopup()
-            setSelectedBridge(bridge)
-            setShowReportForm(true)
-          })
-        }
-      })
-      
-      markerCluster.addLayer(marker)
-    })
+    // Add markers to cluster
+    updateMapMarkers()
     
     map.addLayer(markerCluster)
     
+    // Update coordinates on map move
     const onMove = () => {
       const c = map.getCenter()
       setCoords({
@@ -363,6 +449,7 @@ export default function LeafletMap() {
     map.on('move', onMove)
     map.on('zoom', onMove)
     
+    // Invalidate size after a delay to ensure proper rendering
     setTimeout(() => {
       try { map.invalidateSize() } catch (e) { }
     }, 100)
@@ -375,86 +462,40 @@ export default function LeafletMap() {
         delete window._leaflet_maps[cid]
       }
     }
-  }, [navigate, currentUser]) // Added currentUser dependency
+  }, [navigate, user])
   
-  // Handle filtering
+  // Update markers when bridges, filters, or user changes
   useEffect(() => {
-    const map = mapRef.current
-    const cluster = markersRef.current
-    
-    if (!map || !cluster) return
-    
-    try {
-      cluster.clearLayers()
-    } catch (e) {
-      console.error('Failed to clear cluster layers:', e)
+    if (mapRef.current && markersRef.current) {
+      console.log('Map - Updating markers due to change in bridges/filters')
+      updateMapMarkers()
     }
-    
-    const filteredBridges = PROVIDED_BRIDGES.filter(b => {
-      if (query && !b.name.toLowerCase().includes(query.toLowerCase())) {
-        return false
+  }, [bridges, query, statusFilter, user])
+  
+  // Listen for health updates
+  useEffect(() => {
+    const handleHealthUpdated = (event) => {
+      console.log('Map - Received health update:', event.detail)
+      updateMapMarkers()
+    };
+
+    const handleBridgesUpdated = () => {
+      console.log('Map - Received bridges-updated event')
+      if (refreshBridges && typeof refreshBridges === 'function') {
+        refreshBridges()
+      } else {
+        updateMapMarkers()
       }
-      
-      if (healthFilter !== 'all') {
-        const cls = classification(b.bqi ?? 0)
-        const status = cls.label === 'Safe' ? 'Good' : cls.label
-        
-        switch (healthFilter) {
-          case 'good': return status === 'Good'
-          case 'moderate': return status === 'Moderate'
-          case 'critical': return status === 'Critical'
-          default: return true
-        }
-      }
-      
-      return true
-    })
+    };
+
+    window.addEventListener('bqi-health-updated', handleHealthUpdated);
+    window.addEventListener('bqi-bridges-updated', handleBridgesUpdated);
     
-    filteredBridges.forEach(b => {
-      const icon = makeIcon(b.bqi)
-      const marker = L.marker([b.lat, b.lng], { icon, title: b.name })
-      
-      marker.bindPopup(createPopupContent(b))
-      
-      marker.on('popupopen', (e) => {
-        const popupEl = e.popup.getElement()
-        const submitBtn = popupEl.querySelector('#submit-report-btn')
-        
-        if (submitBtn) {
-          submitBtn.addEventListener('click', (event) => {
-            event.preventDefault()
-            const bridgeId = submitBtn.getAttribute('data-bridge-id')
-            const bridgeName = submitBtn.getAttribute('data-bridge-name')
-            const bridge = PROVIDED_BRIDGES.find(br => br.id === bridgeId)
-            
-            const user = JSON.parse(localStorage.getItem('bqi_user') || 'null')
-            if (!user) {
-              navigate('/login')
-              return
-            }
-            
-            // Check if user is admin - should not happen since button won't show for admin
-            if (user.role === 'admin') {
-              return
-            }
-            
-            if (mapRef.current) {
-              mapRef.current.closePopup()
-            }
-            setSelectedBridge(bridge)
-            setShowReportForm(true)
-          })
-        }
-      })
-      
-      cluster.addLayer(marker)
-    })
-    
-    if (map.hasLayer(cluster)) {
-      map.removeLayer(cluster)
-      map.addLayer(cluster)
-    }
-  }, [query, healthFilter, navigate, currentUser]) // Added currentUser dependency
+    return () => {
+      window.removeEventListener('bqi-health-updated', handleHealthUpdated);
+      window.removeEventListener('bqi-bridges-updated', handleBridgesUpdated);
+    };
+  }, [refreshBridges]);
   
   // Persist filters to localStorage
   useEffect(() => {
@@ -462,9 +503,61 @@ export default function LeafletMap() {
   }, [query])
   
   useEffect(() => {
-    localStorage.setItem('bqi_health', healthFilter)
-  }, [healthFilter])
+    localStorage.setItem('bqi_status', statusFilter)
+  }, [statusFilter])
   
+  // Auto-refresh BQI every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (refreshBridges && typeof refreshBridges === 'function') {
+        console.log('Auto-refreshing bridges and BQI...')
+        refreshBridges()
+      }
+    }, 5 * 60 * 1000) // 5 minutes
+    
+    return () => clearInterval(interval)
+  }, [refreshBridges])
+  
+  // Handle report form submission
+  const handleSubmitReport = async (e) => {
+    e.preventDefault()
+    
+    const formData = new FormData(e.target)
+    const reportData = {
+      id: Date.now(),
+      bridgeId: selectedBridge.id,
+      bridgeName: selectedBridge.name,
+      issueType: formData.get('issueType'),
+      title: formData.get('title'),
+      description: formData.get('description'),
+      reporterName: user?.name || user?.email?.split('@')[0],
+      reporterEmail: user?.email,
+      timestamp: new Date().toISOString(),
+      status: 'submitted'
+    }
+    
+    try {
+      setIsLoading(true)
+      // Save to localStorage
+      const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
+      reports.push(reportData)
+      localStorage.setItem('bqi_reports', JSON.stringify(reports))
+      
+      setShowReportForm('success')
+      
+      // Reset after 3 seconds
+      setTimeout(() => {
+        setShowReportForm(false)
+        setSelectedBridge(null)
+      }, 3000)
+    } catch (error) {
+      console.error('Error submitting report:', error)
+      alert('Failed to submit report. Please try again.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   // Close report form
   const handleCloseReportForm = () => {
     setShowReportForm(false)
@@ -476,31 +569,57 @@ export default function LeafletMap() {
     setIsFilterExpanded(!isFilterExpanded)
   }
 
-  // Get visible bridge count
-  const getVisibleBridgeCount = () => {
-    return PROVIDED_BRIDGES.filter(b => {
-      if (query && !b.name.toLowerCase().includes(query.toLowerCase())) return false
-      if (healthFilter !== 'all') {
-        const cls = classification(b.bqi ?? 0)
-        const status = cls.label === 'Safe' ? 'Good' : cls.label
-        switch (healthFilter) {
-          case 'good': return status === 'Good'
-          case 'moderate': return status === 'Moderate'
-          case 'critical': return status === 'Critical'
-          default: return true
-        }
+  // Safe refresh bridges function
+  const handleRefreshBridges = async () => {
+    try {
+      setIsLoading(true)
+      if (refreshBridges && typeof refreshBridges === 'function') {
+        console.log('Refreshing bridges via context function')
+        await refreshBridges()
+      } else {
+        console.warn('refreshBridges not available in context')
+        window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
       }
-      return true
-    }).length
+    } catch (error) {
+      console.error('Error refreshing bridges:', error)
+      alert('Failed to refresh bridges: ' + (error.message || 'Unknown error'))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Clear all filters
+  const clearFilters = () => {
+    setQuery('')
+    setStatusFilter('all')
+  }
+  
+  // Format last update time
+  const formatUpdateTime = () => {
+    if (!lastUpdateTime) return 'Never'
+    const time = new Date(lastUpdateTime)
+    const now = new Date()
+    const diffMs = now - time
+    const diffMins = Math.floor(diffMs / 60000)
+    
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    return time.toLocaleDateString()
   }
   
   return (
-    <div className="page-full" style={{ position: 'relative', height: '100vh' }}>
-      {/* Top-Left Coordinates Display */}
+    <div style={{ 
+      position: 'relative', 
+      width: '100%',
+      minHeight: '600px'
+    }}>
+      {/* Bottom-Right Coordinates Display */}
       <div style={{
         position: 'absolute',
-        left: `${sidebarOffset}px`,
-        top: `${NAVBAR_HEIGHT + 20}px`,
+        right: '20px',
+        bottom: '20px',
         zIndex: 4000,
         background: 'rgba(255, 255, 255, 0.95)',
         padding: '12px 16px',
@@ -512,33 +631,61 @@ export default function LeafletMap() {
         border: '1px solid rgba(255, 255, 255, 0.2)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '4px'
+        gap: '4px',
+        minWidth: '220px'
       }}>
         <div style={{ fontWeight: '600', fontSize: '11px', color: '#555' }}>
-          CURRENT VIEW
+          BRIDGE QUALITY MAP
         </div>
         <div style={{ color: '#333' }}>
           {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
         </div>
         <div style={{ fontSize: '11px', color: '#666' }}>
-          Zoom: {coords.zoom} | Bridges: {getVisibleBridgeCount()}/{PROVIDED_BRIDGES.length}
-          {currentUser && (
-            <div style={{ marginTop: '4px', fontSize: '10px', color: currentUser.role === 'admin' ? '#8B5CF6' : '#10B981' }}>
-              Mode: {currentUser.role === 'admin' ? '👑 Admin' : '👤 User'}
+          Zoom: {coords.zoom} | Bridges: {visibleBridgesCount}/{(bridges||[]).length}
+          <div style={{ marginTop: '4px' }}>
+            Updated: {formatUpdateTime()}
+          </div>
+          {user && (
+            <div style={{ marginTop: '4px', fontSize: '10px', color: currentIsAdmin ? '#8B5CF6' : '#10B981' }}>
+              Mode: {currentIsAdmin ? '👑 Admin' : '👤 User'}
             </div>
           )}
         </div>
+        <button
+          onClick={handleRefreshBridges}
+          disabled={isLoading}
+          style={{
+            marginTop: '8px',
+            padding: '6px 12px',
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: '500',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+            opacity: isLoading ? 0.7 : 1,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px'
+          }}
+        >
+          {isLoading ? '🔄 Refreshing...' : '🔄 Refresh BQI'}
+        </button>
       </div>
       
       {/* Top-Right Filter Toggle Button */}
       <div style={{
         position: 'absolute',
         right: '20px',
-        top: `${NAVBAR_HEIGHT + 20}px`,
+        top: '20px',
         zIndex: 4001
       }}>
         <button
           onClick={toggleFilterPanel}
+          disabled={isLoading}
           style={{
             background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
             color: 'white',
@@ -553,15 +700,20 @@ export default function LeafletMap() {
             fontSize: '24px',
             boxShadow: '0 4px 15px rgba(31, 111, 235, 0.3)',
             transition: 'all 0.3s ease',
-            fontWeight: 'bold'
+            fontWeight: 'bold',
+            opacity: isLoading ? 0.7 : 1
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'scale(1.1)'
-            e.currentTarget.style.boxShadow = '0 6px 20px rgba(31, 111, 235, 0.4)'
+            if (!isLoading) {
+              e.currentTarget.style.transform = 'scale(1.1)'
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(31, 111, 235, 0.4)'
+            }
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)'
-            e.currentTarget.style.boxShadow = '0 4px 15px rgba(31, 111, 235, 0.3)'
+            if (!isLoading) {
+              e.currentTarget.style.transform = 'scale(1)'
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(31, 111, 235, 0.3)'
+            }
           }}
         >
           {isFilterExpanded ? '−' : '+'}
@@ -572,7 +724,7 @@ export default function LeafletMap() {
       <div style={{
         position: 'absolute',
         right: '20px',
-        top: `${NAVBAR_HEIGHT + 80}px`,
+        top: '80px',
         zIndex: 4000,
         background: 'rgba(255, 255, 255, 0.98)',
         padding: isFilterExpanded ? '20px' : '0',
@@ -641,55 +793,6 @@ export default function LeafletMap() {
               </button>
             </div>
             
-            {/* User Mode Indicator */}
-            {currentUser && (
-              <div style={{
-                padding: '12px',
-                background: currentUser.role === 'admin' 
-                  ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05))'
-                  : 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05))',
-                borderRadius: '10px',
-                border: `1px solid ${currentUser.role === 'admin' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
-              }}>
-                <div style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  background: currentUser.role === 'admin' 
-                    ? 'linear-gradient(135deg, #8B5CF6, #7C3AED)' 
-                    : 'linear-gradient(135deg, #10B981, #059669)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontSize: '16px',
-                  fontWeight: 'bold'
-                }}>
-                  {currentUser.role === 'admin' ? '👑' : '👤'}
-                </div>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
-                    {currentUser.name || currentUser.email.split('@')[0]}
-                  </div>
-                  <div style={{ 
-                    fontSize: '12px', 
-                    color: currentUser.role === 'admin' ? '#8B5CF6' : '#10B981',
-                    fontWeight: '500'
-                  }}>
-                    {currentUser.role === 'admin' ? 'Administrator Mode' : 'User Mode'}
-                    {currentUser.role === 'admin' && (
-                      <span style={{ display: 'block', fontSize: '11px', color: '#666', marginTop: '2px' }}>
-                        Submit report feature disabled
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            
             {/* Search Input */}
             <div>
               <label style={{
@@ -707,6 +810,7 @@ export default function LeafletMap() {
                 placeholder="Type bridge name..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                disabled={isLoading}
                 style={{
                   width: '100%',
                   padding: '12px 14px',
@@ -716,12 +820,15 @@ export default function LeafletMap() {
                   outline: 'none',
                   transition: 'all 0.2s',
                   boxSizing: 'border-box',
-                  background: '#fafafa'
+                  background: isLoading ? '#f5f5f5' : '#fafafa',
+                  opacity: isLoading ? 0.7 : 1
                 }}
                 onFocus={(e) => {
-                  e.target.style.borderColor = '#1f6feb';
-                  e.target.style.background = '#fff';
-                  e.target.style.boxShadow = '0 0 0 4px rgba(31, 111, 235, 0.1)';
+                  if (!isLoading) {
+                    e.target.style.borderColor = '#1f6feb';
+                    e.target.style.background = '#fff';
+                    e.target.style.boxShadow = '0 0 0 4px rgba(31, 111, 235, 0.1)';
+                  }
                 }}
                 onBlur={(e) => {
                   e.target.style.borderColor = '#e0e0e0';
@@ -731,7 +838,7 @@ export default function LeafletMap() {
               />
             </div>
             
-            {/* Health Filter */}
+            {/* Status Filter */}
             <div>
               <label style={{
                 display: 'block',
@@ -741,14 +848,16 @@ export default function LeafletMap() {
                 color: '#444'
               }}>
                 <span style={{ marginRight: '8px' }}>🏥</span>
-                Health Status
+                Bridge Status
               </label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {[
                   { value: 'all', label: 'All Status', color: 'linear-gradient(90deg, #2ecc71, #3498db, #f1c40f, #e67e22, #e74c3c)' },
-                  { value: 'good', label: 'Good (≥80)', color: '#2ecc71', emoji: '😀' },
-                  { value: 'moderate', label: 'Moderate (40-79)', color: '#f1c40f', emoji: '🙂' },
-                  { value: 'critical', label: 'Critical (<40)', color: '#e74c3c', emoji: '😢' }
+                  { value: 'excellent', label: 'Excellent (80-100)', color: '#2ecc71', emoji: '😀' },
+                  { value: 'good', label: 'Good (60-79)', color: '#3498db', emoji: '🙂' },
+                  { value: 'fair', label: 'Fair (40-59)', color: '#f1c40f', emoji: '😐' },
+                  { value: 'poor', label: 'Poor (20-39)', color: '#e67e22', emoji: '🙁' },
+                  { value: 'critical', label: 'Critical (0-19)', color: '#e74c3c', emoji: '😢' }
                 ].map((option) => (
                   <label
                     key={option.value}
@@ -760,17 +869,17 @@ export default function LeafletMap() {
                       padding: '12px',
                       borderRadius: '10px',
                       transition: 'all 0.2s',
-                      background: healthFilter === option.value ? '#f0f7ff' : 'transparent',
-                      border: healthFilter === option.value ? '2px solid #1f6feb' : '2px solid #eee'
+                      background: statusFilter === option.value ? '#f0f7ff' : 'transparent',
+                      border: statusFilter === option.value ? '2px solid #1f6feb' : '2px solid #eee'
                     }}
                     onMouseEnter={(e) => {
-                      if (healthFilter !== option.value) {
+                      if (statusFilter !== option.value) {
                         e.currentTarget.style.background = '#f9f9f9';
                         e.currentTarget.style.borderColor = '#ddd';
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (healthFilter !== option.value) {
+                      if (statusFilter !== option.value) {
                         e.currentTarget.style.background = 'transparent';
                         e.currentTarget.style.borderColor = '#eee';
                       }
@@ -778,10 +887,11 @@ export default function LeafletMap() {
                   >
                     <input
                       type="radio"
-                      name="healthFilter"
+                      name="statusFilter"
                       value={option.value}
-                      checked={healthFilter === option.value}
-                      onChange={(e) => setHealthFilter(e.target.value)}
+                      checked={statusFilter === option.value}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      disabled={isLoading}
                       style={{
                         cursor: 'pointer',
                         width: '18px',
@@ -821,19 +931,18 @@ export default function LeafletMap() {
                 marginBottom: '8px'
               }}>
                 <div style={{ fontSize: '14px', fontWeight: '500', color: '#444' }}>
-                  Showing {getVisibleBridgeCount()} of {PROVIDED_BRIDGES.length} bridges
+                  Showing {visibleBridgesCount} of {(bridges||[]).length} bridges
                 </div>
                 <div style={{
                   padding: '6px 12px',
-                  background: healthFilter === 'all' ? '#f0f7ff' : '#f8f9fa',
+                  background: statusFilter === 'all' ? '#f0f7ff' : '#f8f9fa',
                   borderRadius: '20px',
                   fontSize: '12px',
                   fontWeight: '500',
-                  color: healthFilter === 'all' ? '#1f6feb' : '#666'
+                  color: statusFilter === 'all' ? '#1f6feb' : '#666'
                 }}>
-                  {healthFilter === 'all' ? 'All' : 
-                   healthFilter === 'good' ? 'Good' :
-                   healthFilter === 'moderate' ? 'Moderate' : 'Critical'}
+                  {statusFilter === 'all' ? 'All' : 
+                   statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)}
                 </div>
               </div>
               <div style={{ 
@@ -846,12 +955,10 @@ export default function LeafletMap() {
             </div>
             
             {/* Clear Filters Button */}
-            {(query || healthFilter !== 'all') && (
+            {(query || statusFilter !== 'all') && (
               <button
-                onClick={() => {
-                  setQuery('');
-                  setHealthFilter('all');
-                }}
+                onClick={clearFilters}
+                disabled={isLoading}
                 style={{
                   width: '100%',
                   padding: '12px',
@@ -861,23 +968,28 @@ export default function LeafletMap() {
                   fontSize: '14px',
                   fontWeight: '500',
                   color: '#666',
-                  cursor: 'pointer',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
                   transition: 'all 0.2s',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
-                  marginTop: '8px'
+                  marginTop: '8px',
+                  opacity: isLoading ? 0.7 : 1
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #e9ecef, #dee2e6)';
-                  e.currentTarget.style.borderColor = '#ccc';
-                  e.currentTarget.style.color = '#555';
+                  if (!isLoading) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #e9ecef, #dee2e6)';
+                    e.currentTarget.style.borderColor = '#ccc';
+                    e.currentTarget.style.color = '#555';
+                  }
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #f8f9fa, #e9ecef)';
-                  e.currentTarget.style.borderColor = '#ddd';
-                  e.currentTarget.style.color = '#666';
+                  if (!isLoading) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #f8f9fa, #e9ecef)';
+                    e.currentTarget.style.borderColor = '#ddd';
+                    e.currentTarget.style.color = '#666';
+                  }
                 }}
               >
                 <span>🗑️</span>
@@ -893,15 +1005,17 @@ export default function LeafletMap() {
         ref={containerRef}
         style={{
           width: '100%',
-          height: `calc(100vh - ${NAVBAR_HEIGHT}px)`,
-          marginTop: NAVBAR_HEIGHT
+          height: 'calc(100vh - 120px)',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
         }}
       />
       
-      {/* Bottom-Left BQI Legend */}
+      {/* Bottom-Left Status Legend */}
       <div style={{
         position: 'absolute',
-        left: `${sidebarOffset}px`,
+        left: '20px',
         bottom: '20px',
         zIndex: 4000,
         background: 'rgba(255, 255, 255, 0.98)',
@@ -911,7 +1025,7 @@ export default function LeafletMap() {
         boxShadow: '0 8px 25px rgba(0,0,0,0.15)',
         backdropFilter: 'blur(10px)',
         border: '1px solid rgba(255, 255, 255, 0.3)',
-        width: '220px'
+        width: '240px'
       }}>
         <div style={{ 
           fontWeight: '600', 
@@ -923,15 +1037,15 @@ export default function LeafletMap() {
           gap: '8px'
         }}>
           <span style={{ fontSize: '18px' }}>📊</span>
-          BQI Score Legend
+          Bridge Quality Index (BQI)
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {[
-            { color: '#2ecc71', label: 'Good', range: '80-100', emoji: '😀' },
-            { color: '#3498db', label: 'Moderate', range: '60-79', emoji: '🙂' },
-            { color: '#f1c40f', label: 'Fair', range: '40-59', emoji: '😐' },
-            { color: '#e67e22', label: 'Poor', range: '20-39', emoji: '🙁' },
-            { color: '#e74c3c', label: 'Critical', range: '<20', emoji: '😢' }
+            { range: '80-100', label: 'Excellent', color: '#2ecc71', emoji: '😀', desc: 'Safe' },
+            { range: '60-79', label: 'Good', color: '#3498db', emoji: '🙂', desc: 'Stable' },
+            { range: '40-59', label: 'Fair', color: '#f1c40f', emoji: '😐', desc: 'Monitor' },
+            { range: '20-39', label: 'Poor', color: '#e67e22', emoji: '🙁', desc: 'Caution' },
+            { range: '0-19', label: 'Critical', color: '#e74c3c', emoji: '😢', desc: 'Danger' }
           ].map((item) => (
             <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{
@@ -944,16 +1058,28 @@ export default function LeafletMap() {
               }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: '500', color: '#333', fontSize: '13px' }}>{item.label}</div>
-                <div style={{ fontSize: '11px', color: '#666' }}>{item.range}</div>
+                <div style={{ fontSize: '11px', color: '#666' }}>{item.range} - {item.desc}</div>
               </div>
               <span style={{ fontSize: '18px' }}>{item.emoji}</span>
             </div>
           ))}
         </div>
+        <div style={{ 
+          marginTop: '12px', 
+          paddingTop: '12px', 
+          borderTop: '1px solid #eee',
+          fontSize: '10px',
+          color: '#888'
+        }}>
+          <div style={{ fontWeight: '500', marginBottom: '4px' }}>BQI Formula:</div>
+          <div style={{ fontFamily: 'monospace', fontSize: '9px' }}>
+            BQI = 100 × [0.45×(1−S) + 0.40×(1−V) + 0.15×(1−T)]
+          </div>
+        </div>
       </div>
       
       {/* Report Form Modal - Only show for non-admin users */}
-      {showReportForm && selectedBridge && currentUser && currentUser.role !== 'admin' && (
+      {showReportForm && selectedBridge && user && !currentIsAdmin && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -1038,6 +1164,7 @@ export default function LeafletMap() {
                 </h3>
                 <button
                   onClick={handleCloseReportForm}
+                  disabled={isLoading}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -1067,6 +1194,7 @@ export default function LeafletMap() {
                   <select
                     name="issueType"
                     required
+                    disabled={isLoading}
                     style={{
                       width: '100%',
                       padding: '12px',
@@ -1074,7 +1202,8 @@ export default function LeafletMap() {
                       borderRadius: '8px',
                       fontSize: '14px',
                       background: 'white',
-                      outline: 'none'
+                      outline: 'none',
+                      opacity: isLoading ? 0.7 : 1
                     }}
                   >
                     <option value="">Select issue type</option>
@@ -1102,6 +1231,7 @@ export default function LeafletMap() {
                     type="text"
                     name="title"
                     required
+                    disabled={isLoading}
                     placeholder="Brief title describing the issue..."
                     style={{
                       width: '100%',
@@ -1109,7 +1239,8 @@ export default function LeafletMap() {
                       border: '1px solid #ddd',
                       borderRadius: '8px',
                       fontSize: '14px',
-                      outline: 'none'
+                      outline: 'none',
+                      opacity: isLoading ? 0.7 : 1
                     }}
                   />
                 </div>
@@ -1126,6 +1257,7 @@ export default function LeafletMap() {
                   <textarea
                     name="description"
                     required
+                    disabled={isLoading}
                     placeholder="Describe the issue in detail. Include location, severity, and any visible signs..."
                     style={{
                       width: '100%',
@@ -1136,7 +1268,8 @@ export default function LeafletMap() {
                       resize: 'vertical',
                       fontSize: '14px',
                       fontFamily: 'inherit',
-                      outline: 'none'
+                      outline: 'none',
+                      opacity: isLoading ? 0.7 : 1
                     }}
                   />
                 </div>
@@ -1149,6 +1282,7 @@ export default function LeafletMap() {
                   <button
                     type="button"
                     onClick={handleCloseReportForm}
+                    disabled={isLoading}
                     style={{
                       flex: 1,
                       padding: '14px',
@@ -1158,26 +1292,29 @@ export default function LeafletMap() {
                       cursor: 'pointer',
                       fontWeight: '500',
                       fontSize: '14px',
-                      color: '#333'
+                      color: '#333',
+                      opacity: isLoading ? 0.7 : 1
                     }}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
+                    disabled={isLoading}
                     style={{
                       flex: 1,
                       padding: '14px',
-                      background: 'linear-gradient(90deg, #1f6feb, #3fb0ff)',
+                      background: isLoading ? '#94a3b8' : 'linear-gradient(90deg, #1f6feb, #3fb0ff)',
                       color: 'white',
                       border: 'none',
                       borderRadius: '8px',
-                      cursor: 'pointer',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
                       fontWeight: '500',
-                      fontSize: '14px'
+                      fontSize: '14px',
+                      opacity: isLoading ? 0.7 : 1
                     }}
                   >
-                    Submit Report
+                    {isLoading ? 'Submitting...' : 'Submit Report'}
                   </button>
                 </div>
               </form>
@@ -1186,13 +1323,17 @@ export default function LeafletMap() {
         </div>
       )}
       
+
+      
       {/* Styles */}
       <style>{`
         .glow-marker {
-          width: 24px;
-          height: 24px;
+          width: 32px;
+          height: 32px;
           border-radius: 50%;
           position: relative;
+          animation: pulse 2s infinite;
+          cursor: pointer;
         }
         
         .glow-marker::after {
@@ -1201,11 +1342,24 @@ export default function LeafletMap() {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 100%;
-          height: 100%;
+          width: 140%;
+          height: 140%;
           border-radius: 50%;
-          box-shadow: 0 0 20px currentColor;
-          opacity: 0.7;
+          background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+          opacity: 0.8;
+          z-index: -1;
+        }
+        
+        @keyframes pulse {
+          0% {
+            box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7);
+          }
+          70% {
+            box-shadow: 0 0 0 15px rgba(46, 204, 113, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(46, 204, 113, 0);
+          }
         }
         
         .leaflet-container {
@@ -1226,52 +1380,89 @@ export default function LeafletMap() {
           filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
         }
         
+        .cluster-marker {
+          animation: clusterPulse 3s infinite;
+        }
+        
+        @keyframes clusterPulse {
+          0%, 100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.05);
+          }
+        }
+        
         input:focus, select:focus, textarea:focus {
           border-color: #1f6feb !important;
           box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.1) !important;
         }
         
-        button:hover {
+        button:hover:not(:disabled) {
           opacity: 0.9;
           transform: translateY(-1px);
         }
         
-        button:active {
+        button:active:not(:disabled) {
           transform: translateY(0);
         }
         
         /* Responsive design */
         @media (max-width: 768px) {
+          .coordinates-panel {
+            right: 10px !important;
+            bottom: 10px !important;
+            left: auto !important;
+            top: auto !important;
+            min-width: 180px !important;
+            font-size: 11px !important;
+            padding: 10px 12px !important;
+          }
+          
+          .filter-toggle {
+            width: 40px !important;
+            height: 40px !important;
+            right: 10px !important;
+            top: 10px !important;
+            font-size: 20px !important;
+          }
+          
           .filter-panel {
             width: 280px !important;
             right: 10px !important;
-          }
-          
-          .toggle-button {
-            width: 45px !important;
-            height: 45px !important;
-            right: 10px !important;
+            top: 60px !important;
           }
           
           .legend-panel {
             width: 200px !important;
-            right: 10px !important;
-            bottom: 10px !important;
+            left: 10px !important;
+            bottom: 120px !important;
+            padding: 12px !important;
+            font-size: 11px !important;
           }
           
-          .coordinates-panel {
-            left: 10px !important;
-            top: 70px !important;
+          .map-container {
+            height: calc(100vh - 120px) !important;
+          }
+          
+          .debug-info {
+            display: none !important;
           }
         }
         
         @media (max-width: 480px) {
+          .coordinates-panel {
+            min-width: 160px !important;
+            padding: 8px 10px !important;
+          }
+          
           .filter-panel {
             width: 260px !important;
           }
           
           .legend-panel {
             width: 180px !important;
+            bottom: 140px !important;
           }
         }
       `}</style>

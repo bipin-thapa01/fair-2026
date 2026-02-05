@@ -1,7 +1,64 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 
 export default function Sidebar({ open = true }) {
+  const [stats, setStats] = useState({
+    pendingReports: 0,
+    activeUsers: 0,
+    bridgesMonitored: 0,
+    healthLogsToday: 0
+  });
+
+  useEffect(() => {
+    // Load stats from localStorage
+    const loadStats = () => {
+      try {
+        // Get pending reports count
+        const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]');
+        const pendingReports = reports.filter(r => r.status === 'Pending').length;
+
+        // Get active users count (users who have submitted reports)
+        const userReports = reports.filter(r => r.userEmail);
+        const uniqueUsers = new Set(userReports.map(r => r.userEmail)).size;
+
+        // Get bridges monitored count
+        const bridges = JSON.parse(localStorage.getItem('bqi_bridges') || '[]');
+        const bridgesMonitored = bridges.length;
+
+        // Get today's health logs count (from bridge logs)
+        const today = new Date().toISOString().split('T')[0];
+        const bridgeLogs = JSON.parse(localStorage.getItem('bqi_bridge_logs') || '[]');
+        const healthLogsToday = bridgeLogs.filter(log => {
+          const logDate = new Date(log.timestamp || log.date).toISOString().split('T')[0];
+          return logDate === today;
+        }).length;
+
+        setStats({
+          pendingReports,
+          activeUsers: uniqueUsers,
+          bridgesMonitored,
+          healthLogsToday
+        });
+      } catch (error) {
+        console.error('Error loading stats:', error);
+      }
+    };
+
+    loadStats();
+
+    // Listen for changes in localStorage
+    const handleStorageChange = () => loadStats();
+    window.addEventListener('storage', handleStorageChange);
+    
+    // Custom event for when reports/bridges are updated
+    window.addEventListener('bqi-data-updated', loadStats);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('bqi-data-updated', loadStats);
+    };
+  }, []);
+
   useEffect(()=>{
     try{
       if (open) document.body.classList.add('bqi-sidebar-open')
@@ -18,7 +75,8 @@ export default function Sidebar({ open = true }) {
     { path: '/admin/reports', label: 'Reports Oversight', icon: '📋', color: '#10B981' },
     { path: '/admin/users', label: 'User Management', icon: '👥', color: '#8B5CF6' },
     { path: '/admin/bridges', label: 'Bridge Management', icon: '🌉', color: '#F59E0B' },
-    { path: '/maps', label: 'Bridge Map', icon: '🗺️', color: '#EC4899' },
+    { path: '/admin/health-logs', label: 'Bridge Health Logs', icon: '📈', color: '#EC4899' },
+    { path: '/maps', label: 'Bridge Map', icon: '🗺️', color: '#0EA5E9' },
   ]
 
   return (
@@ -233,6 +291,14 @@ export default function Sidebar({ open = true }) {
                     Manage Accounts
                   </div>
                 )}
+                {item.path === '/admin/health-logs' && (
+                  <div style={{
+                    fontSize: '11px',
+                    color: isActive ? 'rgba(255, 255, 255, 0.7)' : '#64748B'
+                  }}>
+                    Real-time Monitoring
+                  </div>
+                )}
               </div>
 
               {/* Active indicator dot */}
@@ -273,15 +339,51 @@ export default function Sidebar({ open = true }) {
             letterSpacing: '0.5px',
             marginBottom: '12px'
           }}>
-            Quick Stats
+            System Stats
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
             {[
-              { label: 'Pending Reports', value: '5', color: '#F59E0B' },
-              { label: 'Active Users', value: '48', color: '#10B981' },
-              { label: 'Bridges Monitored', value: '11', color: '#3B82F6' },
+              { 
+                label: 'Pending Reports', 
+                value: stats.pendingReports, 
+                color: '#F59E0B',
+                link: '/admin/reports?status=pending'
+              },
+              { 
+                label: 'Active Users', 
+                value: stats.activeUsers, 
+                color: '#10B981',
+                link: '/admin/users'
+              },
+              { 
+                label: 'Bridges Monitored', 
+                value: stats.bridgesMonitored, 
+                color: '#3B82F6',
+                link: '/admin/bridges'
+              },
+              { 
+                label: 'Today\'s Logs', 
+                value: stats.healthLogsToday, 
+                color: '#EC4899',
+                link: '/admin/health-logs'
+              },
             ].map((stat, index) => (
-              <div key={index} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Link
+                key={index}
+                to={stat.link}
+                style={{
+                  textDecoration: 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.transform = 'translateX(4px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.transform = 'translateX(0)';
+                }}
+              >
                 <div style={{
                   width: '8px',
                   height: '8px',
@@ -304,7 +406,7 @@ export default function Sidebar({ open = true }) {
                 }}>
                   {stat.value}
                 </div>
-              </div>
+              </Link>
             ))}
           </div>
         </div>
