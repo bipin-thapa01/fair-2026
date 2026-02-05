@@ -18,6 +18,12 @@ Adafruit_MPU6050 mpu;
 HX711 scale;
 DHT dht(DHTPIN, DHTTYPE);
 
+bool isFirstTurn = true;
+float pastStrain;
+float pastVibration;
+float pastTemp;
+float pastHumidity;
+
 // Strain gauge
 float strain_microstrain, x_acc, y_acc, z_acc;
 
@@ -117,25 +123,58 @@ void loop() {
   const float MAX_STRAIN = 500.0; // µε (design limit)
   float normalizedStrain = fabs(strainMicrostrain);
 
-  if(WiFi.status() == WL_CONNECTED){
-    HTTPClient http;
-    http.begin(api);
-    http.addHeader("Content-Type","application/json");
+  if(isFirstTurn){
+    isFirstTurn = false;
 
-    String jsonData = "{";
-    jsonData += "\"bridgeId\": \"BRIDGE-001\",";
-    jsonData += "\"vibrationMs2\": " + String(normalizedVibration_ms2, 2) + ",";
-    jsonData += "\"temperatureC\": " + String(normalizedTemperature, 2) + ",";
-    jsonData += "\"humidityPercent\": " + String(normalizedHumidity, 2) + ",";
-    jsonData += "\"strainMicrostrain\": " + String(normalizedStrain, 2);
-    jsonData += "}";
+    if(WiFi.status() == WL_CONNECTED){
+      HTTPClient http;
+      http.begin(api);
+      http.addHeader("Content-Type","application/json");
 
-    int resCode = http.POST(jsonData);
-    Serial.println(jsonData);
-    Serial.println(resCode);
+      String jsonData = "{";
+      jsonData += "\"bridgeId\": \"BRIDGE-001\",";
+      jsonData += "\"vibrationMs2\": " + String(normalizedVibration_ms2, 2) + ",";
+      jsonData += "\"temperatureC\": " + String(normalizedTemperature, 2) + ",";
+      jsonData += "\"humidityPercent\": " + String(normalizedHumidity, 2) + ",";
+      jsonData += "\"strainMicrostrain\": " + String(normalizedStrain, 2);
+      jsonData += "}";
 
-    http.end();
+      int resCode = http.POST(jsonData);
+      Serial.println(jsonData);
+      Serial.println(resCode);
+
+      http.end();
+    }
   }
+  else if(fabs(normalizedStrain - pastStrain) >= 0.1 || 
+  fabs(normalizedVibration_ms2 - pastVibration) >= 0.1 || 
+  fabs(normalizedHumidity - pastHumidity) >= 0.1 || 
+  fabs(normalizedTemperature - pastTemp) >= 0.1){
+    if(WiFi.status() == WL_CONNECTED){
+      HTTPClient http;
+      http.begin(api);
+      http.addHeader("Content-Type","application/json");
+
+      String jsonData = "{";
+      jsonData += "\"bridgeId\": \"BRIDGE-001\",";
+      jsonData += "\"vibrationMs2\": " + String(normalizedVibration_ms2, 2) + ",";
+      jsonData += "\"temperatureC\": " + String(normalizedTemperature, 2) + ",";
+      jsonData += "\"humidityPercent\": " + String(normalizedHumidity, 2) + ",";
+      jsonData += "\"strainMicrostrain\": " + String(normalizedStrain, 2);
+      jsonData += "}";
+
+      int resCode = http.POST(jsonData);
+      Serial.println(jsonData);
+      Serial.println(resCode);
+
+      http.end();
+    }
+  }
+
+  pastStrain = normalizedStrain;
+  pastVibration = normalizedVibration_ms2;
+  pastTemp = normalizedTemperature;
+  pastHumidity = normalizedHumidity;
 
   } else {
     Serial.println("HX711 not found.");
