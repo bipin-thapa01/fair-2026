@@ -1033,7 +1033,8 @@ export default function HealthLogs() {
                           }}>
                             <div style={{
                               display: 'flex',
-                              gap: '16px'
+                              gap: '12px',
+                              flexWrap: 'wrap'
                             }}>
                               <div>
                                 <div style={{
@@ -1078,6 +1079,21 @@ export default function HealthLogs() {
                                   color: log.vibrationMs2 > 3 ? '#DC2626' : '#059669'
                                 }}>
                                   {log.vibrationMs2?.toFixed(2)} m/s²
+                                </div>
+                              </div>
+                              <div>
+                                <div style={{
+                                  fontSize: '11px',
+                                  color: '#64748B',
+                                  marginBottom: '2px'
+                                }}>
+                                  Humidity
+                                </div>
+                                <div style={{
+                                  fontWeight: '600',
+                                  color: log.humidityPercent > 80 ? '#DC2626' : '#059669'
+                                }}>
+                                  {log.humidityPercent?.toFixed(0)}%
                                 </div>
                               </div>
                             </div>
