@@ -43,9 +43,9 @@ export default function User(){
   }
 
   const displayName = () => {
-    const email = user?.email || 'user'
-    const name = email.split('@')[0] || 'user'
-    return name.charAt(0).toUpperCase() + name.slice(1)
+    const name = user?.name || user?.email || 'user'
+    const base = name.split ? (name.split('@')[0] || name) : name
+    return base.charAt(0).toUpperCase() + base.slice(1)
   }
 
   const reportsSubmitted = 7
@@ -196,7 +196,7 @@ export default function User(){
           </div>
 
           {/* Charts: only show for admin users; hide for regular users */}
-          {user?.role === 'admin' && (
+          {(user?.role || '').toString().toLowerCase() === 'admin' && (
             <>
               <h4 style={{marginTop:18}}>Bridge Analytics</h4>
               <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>

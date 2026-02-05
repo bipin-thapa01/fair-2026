@@ -18,18 +18,19 @@ export default function About() {
       ]
     },
     solution: {
-      title: 'Solutions',
-      icon: '💡',
-      color: '#10B981',
-      content: `BQI combines sensor data and inspection inputs into a single, easy-to-interpret score to guide maintenance decisions and public reporting.`,
-      bullets: [
-        'BQI provides a digital platform to evaluate bridge safety',
-        'Weighted analysis of strain, vibration, and temperature',
-        'Role-based dashboards for monitoring and reporting',
-        'Real-time data visualization and alerts',
-        'Public transparency with controlled access levels'
-      ]
-    },
+  title: 'Solutions',
+  icon: '💡',
+  color: '#10B981',
+  content: `BQI leverages IoT-enabled sensors and machine-learning models to transform raw bridge data and inspection inputs into a single, easy-to-interpret safety score for informed maintenance and public reporting.`,
+  bullets: [
+    'IoT-based sensor network for continuous bridge monitoring',
+    'Machine-learning models for condition assessment and anomaly detection',
+    'Weighted analysis of strain, vibration, and temperature data',
+    'Role-based dashboards for monitoring, decision-making, and reporting',
+    'Real-time data visualization, alerts, and controlled public transparency'
+  ]
+}
+,
     formula: {
       title: 'BQI Formula',
       icon: '📐',
@@ -45,18 +46,19 @@ export default function About() {
       ]
     },
     future: {
-      title: 'Future Scope',
-      icon: '🚀',
-      color: '#8B5CF6',
-      content: `We plan to expand BQI with richer sensor types, machine-learning prediction, and tighter integration with government platforms.`,
-      bullets: [
-        'IoT sensor integration for comprehensive monitoring',
-        'AI-based predictive maintenance algorithms',
-        'Government GIS platform integration',
-        'Mobile app for field inspections',
-        'Automated report generation and alerts'
-      ]
-    }
+  title: 'Future Scope',
+  icon: '🚀',
+  color: '#8B5CF6',
+  content: `We plan to expand BQI by enhancing system scalability, real-time decision support, and deeper institutional adoption.`,
+  bullets: [
+    'Nationwide expansion of bridge coverage',
+    'Advanced analytics dashboards for decision-makers',
+    'Deeper integration with government GIS platforms',
+    'Mobile application for real-time field inspections',
+    'Automated reporting, alerts, and policy-level insights'
+  ]
+}
+
   }
 
   return (

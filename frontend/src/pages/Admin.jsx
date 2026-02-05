@@ -2,44 +2,14 @@ import React, { useContext, useState, useEffect } from 'react'
 import { BridgesContext } from '../contexts/BridgesContext'
 import Sidebar from '../components/Sidebar'
 import Topbar from '../components/Topbar'
-import { Doughnut, Bar, Line } from 'react-chartjs-2'
-import { 
-  Chart as ChartJS, 
-  ArcElement, 
-  Tooltip, 
-  Legend, 
-  CategoryScale, 
-  LinearScale, 
-  BarElement, 
-  PointElement, 
-  LineElement, 
-  Filler,
-  Title 
-} from 'chart.js'
-
-ChartJS.register(
-  ArcElement, 
-  Tooltip, 
-  Legend, 
-  CategoryScale, 
-  LinearScale, 
-  BarElement, 
-  PointElement, 
-  LineElement, 
-  Filler,
-  Title
-)
+import api from "../lib/api";
 
 export default function Admin(){
   const { bridges } = useContext(BridgesContext)
   const [asideOpen, setAsideOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('overview')
-  const [searchTerm, setSearchTerm] = useState('')
-  const [dateRange, setDateRange] = useState({
-    start: new Date().toISOString().split('T')[0],
-    end: new Date().toISOString().split('T')[0]
-  })
-  const [filterStatus, setFilterStatus] = useState('all')
+  const [reports, setReports] = useState([])
+  const [users, setUsers] = useState([])
+  const [mlLogs, setMlLogs] = useState([])
 
   useEffect(() => {
     const handler = () => setAsideOpen(v => !v)
@@ -47,243 +17,86 @@ export default function Admin(){
     return () => window.removeEventListener('bqi-toggle-sidebar', handler)
   }, [])
 
-  // Fetch additional data (example)
+  // Load real data
   useEffect(() => {
-    const fetchAdminData = async () => {
+    const loadDashboardData = async () => {
       try {
-        const token = localStorage.getItem('bqi_token')
-        const response = await fetch('/api/admin/dashboard', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
+        // Load reports from localStorage
+        const storedReports = localStorage.getItem('bqi_reports')
+        if (storedReports) {
+          const parsedReports = JSON.parse(storedReports)
+          setReports(parsedReports)
+        }
+
+        // Load users from API
+        try {
+          const usersData = await api.getUsers()
+          setUsers(usersData)
+        } catch (error) {
+          console.warn('Using localStorage users due to API error:', error.message)
+          // Fallback to localStorage
+          const storedUsers = localStorage.getItem('bqi_users')
+          if (storedUsers) {
+            setUsers(JSON.parse(storedUsers))
           }
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          // Handle the fetched data
-          console.log('Admin dashboard data:', data)
+        }
+
+        // Load ML logs from API
+        try {
+          const logs = await api.getMLLogs()
+          setMlLogs(logs)
+        } catch (error) {
+          console.warn('No ML logs available:', error.message)
+          setMlLogs([])
         }
       } catch (error) {
-        console.error('Error fetching admin data:', error)
+        console.error('Error loading dashboard data:', error)
       }
     }
-    
-    fetchAdminData()
+
+    loadDashboardData()
   }, [])
 
-  // Calculate metrics
-  const total = bridges.length
-  const avg = Math.round((bridges.reduce((s, b) => s + (b.bqi || 0), 0) / Math.max(1, total)))
-  const critical = bridges.filter(b => (b.bqi || 0) < 50).length
-  const good = bridges.filter(b => (b.bqi || 0) >= 80).length
-  const fair = bridges.filter(b => (b.bqi || 0) >= 50 && (b.bqi || 0) < 80).length
+  // Calculate real metrics
+  const totalBridges = bridges.length
+  const totalUsers = users.length
+  const pendingReports = reports.filter(r => r.status === 'Pending').length
+  const approvedReports = reports.filter(r => r.status === 'Approved').length
+  const declinedReports = reports.filter(r => r.status === 'Declined').length
+  const totalReports = reports.length
 
-  // Mock data for UI
-  const mockHealthLogs = [
-    {id:'h1', bridge:'Bagmati Bridge', bridgeId:'B001', strain:0.35, vibration:2.1, temp:28, ts:'2026-01-30 08:12'},
-    {id:'h2', bridge:'Narayani Bridge', bridgeId:'B002', strain:0.85, vibration:5.2, temp:34, ts:'2026-01-30 07:22'},
-    {id:'h3', bridge:'Koshi Bridge', bridgeId:'B003', strain:0.42, vibration:1.8, temp:26, ts:'2026-01-30 06:45'},
-    {id:'h4', bridge:'Gandaki Bridge', bridgeId:'B004', strain:0.67, vibration:3.9, temp:31, ts:'2026-01-30 05:30'},
-  ]
+  // Bridge health metrics
+  const avgBQI = bridges.length > 0 
+    ? Math.round(bridges.reduce((sum, b) => sum + (b.bqi || 0), 0) / bridges.length)
+    : 0
+  
+  const criticalBridges = bridges.filter(b => (b.bqi || 0) < 40).length
+  const goodBridges = bridges.filter(b => (b.bqi || 0) >= 70).length
+  const fairBridges = bridges.filter(b => (b.bqi || 0) >= 40 && (b.bqi || 0) < 70).length
 
-  const mockMl = [
-    {id:'m1', bridge:'Bagmati Bridge', healthIndex:72, confidence:0.88, action:'Monitor', status:'stable'},
-    {id:'m2', bridge:'Narayani Bridge', healthIndex:43, confidence:0.92, action:'Inspect Now', status:'critical'},
-    {id:'m3', bridge:'Koshi Bridge', healthIndex:89, confidence:0.85, action:'Schedule Maintenance', status:'good'},
-    {id:'m4', bridge:'Gandaki Bridge', healthIndex:56, confidence:0.78, action:'Urgent Review', status:'warning'},
-  ]
-
-  const mockUsers = [
-    {id:'u1', name:'Rajesh Kumar', email:'rajesh@bqi.gov.np', role:'admin', lastLogin:'2026-01-30 09:45'},
-    {id:'u2', name:'Sarita Sharma', email:'sarita@bqi.gov.np', role:'inspector', lastLogin:'2026-01-30 08:30'},
-    {id:'u3', name:'Anil Gurung', email:'anil@example.com', role:'public', lastLogin:'2026-01-29 14:20'},
-    {id:'u4', name:'Government Office', email:'gov@bqi.gov.np', role:'government', lastLogin:'2026-01-30 07:15'},
-  ]
-
-  // Chart data
-  const months = ['Jan','Feb','Mar','Apr','May','Jun']
-  const strainData = [0.3,0.32,0.35,0.38,0.36,0.34]
-  const vibrationData = [1.8,2.0,2.1,2.4,2.3,2.2]
-  const tempData = [26,27,28,29,28,27]
-  const inspectionData = [12,15,18,14,20,22]
-
-  const lineData = {
-    labels: months,
-    datasets: [
-      { 
-        label: 'Strain (µε)', 
-        data: strainData, 
-        borderColor: '#8B5CF6', 
-        backgroundColor: 'rgba(139, 92, 246, 0.1)', 
-        tension: 0.3, 
-        fill: false,
-        borderWidth: 2
-      },
-      { 
-        label: 'Vibration (Hz)', 
-        data: vibrationData, 
-        borderColor: '#10B981', 
-        backgroundColor: 'rgba(16, 185, 129, 0.1)', 
-        tension: 0.3, 
-        fill: false,
-        borderWidth: 2
-      }
-    ]
+  // Bridge health distribution for chart
+  const healthDistribution = {
+    EXCELLENT: bridges.filter(b => (b.bqi || 0) >= 80).length,
+    GOOD: bridges.filter(b => (b.bqi || 0) >= 60 && (b.bqi || 0) < 80).length,
+    FAIR: bridges.filter(b => (b.bqi || 0) >= 40 && (b.bqi || 0) < 60).length,
+    POOR: bridges.filter(b => (b.bqi || 0) >= 20 && (b.bqi || 0) < 40).length,
+    CRITICAL: bridges.filter(b => (b.bqi || 0) < 20).length
   }
 
-  const barData = {
-    labels: ['EXCELLENT','GOOD','FAIR','POOR','CRITICAL'],
-    datasets: [{ 
-      label: 'Bridges', 
-      data: [good, fair, 15, 7, critical], 
-      backgroundColor: ['#059669','#10B981','#F59E0B','#F97316','#DC2626'],
-      borderRadius: 6,
-      borderWidth: 0
-    }]
-  }
+  // Recent reports (last 5)
+  const recentReports = [...reports]
+    .sort((a, b) => new Date(b.submitted || b.timestamp) - new Date(a.submitted || a.timestamp))
+    .slice(0, 5)
 
-  const pieData = { 
-    labels: ['Admin', 'Inspector', 'Government', 'Public'], 
-    datasets: [{ 
-      data: [3, 12, 8, 25], 
-      backgroundColor: ['#0F766E','#3B82F6','#8B5CF6','#10B981'],
-      borderWidth: 0,
-      hoverOffset: 15
-    }] 
-  }
+  // Recent users (last 5)
+  const recentUsers = [...users]
+    .sort((a, b) => new Date(b.lastLogin || b.createdAt) - new Date(a.lastLogin || a.createdAt))
+    .slice(0, 5)
 
-  const areaData = { 
-    labels: months, 
-    datasets: [{ 
-      label:'Temperature (°C)', 
-      data: tempData, 
-      borderColor:'#3B82F6', 
-      backgroundColor:'rgba(59, 130, 246, 0.15)', 
-      fill: true, 
-      tension: 0.3,
-      borderWidth: 2
-    }] 
-  }
-
-  const inspectionsData = {
-    labels: months,
-    datasets: [{
-      label: 'Inspections Completed',
-      data: inspectionData,
-      backgroundColor: 'rgba(16, 185, 129, 0.6)',
-      borderColor: '#10B981',
-      borderWidth: 1,
-      borderRadius: 4
-    }]
-  }
-
-  const chartOptionsCommon = {
-    animation: { duration: 900, easing: 'easeOutCubic' },
-    plugins: { 
-      legend: { 
-        position: 'top',
-        labels: {
-          padding: 20,
-          usePointStyle: true,
-          font: {
-            family: "'Inter', sans-serif",
-            size: 12
-          }
-        }
-      },
-      tooltip: {
-        backgroundColor: 'rgba(15, 23, 42, 0.95)',
-        titleFont: { family: "'Inter', sans-serif", size: 12 },
-        bodyFont: { family: "'Inter', sans-serif", size: 11 },
-        padding: 12,
-        cornerRadius: 8
-      }
-    },
-    responsive: true,
-    maintainAspectRatio: false
-  }
-
-  const lineOptions = { 
-    ...chartOptionsCommon, 
-    scales: { 
-      x: {
-        grid: { display: false }
-      },
-      y: { 
-        beginAtZero: true,
-        grid: { color: 'rgba(0,0,0,0.05)' }
-      }
-    } 
-  }
-
-  const barOptions = {
-    ...chartOptionsCommon,
-    scales: {
-      x: {
-        grid: { display: false }
-      },
-      y: {
-        beginAtZero: true,
-        grid: { color: 'rgba(0,0,0,0.05)' }
-      }
-    }
-  }
-
-  const handleAddUser = async (e) => {
-    e.preventDefault()
-    const formData = new FormData(e.target)
-    const userData = Object.fromEntries(formData)
-    
-    try {
-      const token = localStorage.getItem('bqi_token')
-      const response = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(userData)
-      })
-      
-      if (response.ok) {
-        alert('User added successfully')
-        // Refresh user list
-      }
-    } catch (error) {
-      console.error('Error adding user:', error)
-    }
-  }
-
-  const handleGenerateReport = async () => {
-    try {
-      const token = localStorage.getItem('bqi_token')
-      const response = await fetch('/api/admin/reports', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          startDate: dateRange.start,
-          endDate: dateRange.end,
-          reportType: 'comprehensive'
-        })
-      })
-      
-      if (response.ok) {
-        const blob = await response.blob()
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `bridge-report-${new Date().toISOString().split('T')[0]}.pdf`
-        document.body.appendChild(a)
-        a.click()
-        document.body.removeChild(a)
-      }
-    } catch (error) {
-      console.error('Error generating report:', error)
-    }
+  // Function to trigger data refresh
+  const refreshData = () => {
+    window.dispatchEvent(new CustomEvent('bqi-data-updated'))
+    window.location.reload()
   }
 
   return (
@@ -327,12 +140,26 @@ export default function Admin(){
             </div>
             
             <div style={{ display: 'flex', gap: '12px' }}>
+              <button
+                onClick={refreshData}
+                style={{
+                  padding: '10px 20px',
+                  background: 'rgba(15, 118, 110, 0.1)',
+                  color: '#0F766E',
+                  border: '1px solid rgba(15, 118, 110, 0.2)',
+                  borderRadius: '8px',
+                  fontSize: '14px',
+                  fontWeight: '500',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px'
+                }}
+              >
+                🔄 Refresh Data
+              </button>
             </div>
           </div>
-
-
-
-  
 
           {/* Stats Cards */}
           <div style={{
@@ -342,12 +169,54 @@ export default function Admin(){
             marginBottom: '24px'
           }}>
             {[
-              { title: 'Total Bridges', value: total, icon: '🌉', color: '#0F766E', change: '+2%' },
-              { title: 'Average BQI', value: avg, icon: '📊', color: '#3B82F6', change: '+5%' },
-              { title: 'Critical Bridges', value: critical, icon: '⚠️', color: '#DC2626', change: '-1%' },
-              { title: 'Active Users', value: '48', icon: '👥', color: '#8B5CF6', change: '+12%' },
-              { title: 'Inspections Today', value: '8', icon: '🔍', color: '#10B981', change: '+3%' },
-              { title: 'Reports Generated', value: '156', icon: '📋', color: '#F59E0B', change: '+8%' },
+              { 
+                title: 'Total Bridges', 
+                value: totalBridges, 
+                icon: '🌉', 
+                color: '#0F766E', 
+                desc: 'Monitored bridges',
+                change: bridges.length > 0 ? '+Active' : 'No data'
+              },
+              { 
+                title: 'Average BQI', 
+                value: avgBQI || 'N/A', 
+                icon: '📊', 
+                color: '#3B82F6', 
+                desc: 'Overall health score',
+                change: avgBQI > 70 ? '+Good' : avgBQI > 40 ? '+Fair' : '+Needs Attention'
+              },
+              { 
+                title: 'Critical Bridges', 
+                value: criticalBridges, 
+                icon: '⚠️', 
+                color: '#DC2626', 
+                desc: 'BQI < 40',
+                change: criticalBridges > 0 ? '+Needs Action' : '+All Good'
+              },
+              { 
+                title: 'Total Users', 
+                value: totalUsers, 
+                icon: '👥', 
+                color: '#8B5CF6', 
+                desc: 'Registered users',
+                change: totalUsers > 0 ? '+Active' : 'No users'
+              },
+              { 
+                title: 'Pending Reports', 
+                value: pendingReports, 
+                icon: '📋', 
+                color: '#F59E0B', 
+                desc: 'Awaiting review',
+                change: pendingReports > 0 ? '+Action Required' : '+All Caught Up'
+              },
+              { 
+                title: 'Total Reports', 
+                value: totalReports, 
+                icon: '📈', 
+                color: '#10B981', 
+                desc: 'All submissions',
+                change: totalReports > 0 ? '+Submitted' : 'No reports'
+              },
             ].map((stat, index) => (
               <div key={index} style={{
                 background: 'white',
@@ -381,22 +250,26 @@ export default function Admin(){
                     {stat.icon}
                   </div>
                 </div>
-                <div style={{ marginTop: '12px', fontSize: '12px', color: '#64748B' }}>
-                  <span style={{ color: stat.change.startsWith('+') ? '#10B981' : '#DC2626' }}>
+                <div style={{ marginTop: '12px' }}>
+                  <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
+                    {stat.desc}
+                  </div>
+                  <div style={{ fontSize: '12px', color: stat.change.includes('Good') || stat.change.includes('Caught') ? '#10B981' : '#F59E0B' }}>
                     {stat.change}
-                  </span> from last week
+                  </div>
                 </div>
               </div>
             ))}
           </div>
 
-          {/* Charts Grid */}
+          {/* Data Grid */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(2, 1fr)',
             gap: '20px',
             marginBottom: '24px'
           }}>
+            {/* Recent Reports */}
             <div style={{
               background: 'white',
               padding: '24px',
@@ -406,19 +279,100 @@ export default function Admin(){
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
-                  Sensor Data Trends
+                  Recent Reports
                 </h3>
-                <select style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '14px' }}>
-                  <option>Last 6 months</option>
-                  <option>Last 3 months</option>
-                  <option>Last year</option>
-                </select>
+                <div style={{
+                  fontSize: '14px',
+                  color: '#64748B',
+                  background: '#F8FAFC',
+                  padding: '6px 12px',
+                  borderRadius: '20px'
+                }}>
+                  {pendingReports} Pending
+                </div>
               </div>
-              <div style={{ height: '250px' }}>
-                <Line data={lineData} options={lineOptions} />
+              
+              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+                {recentReports.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748B' }}>
+                    <div style={{ fontSize: '32px', marginBottom: '16px' }}>📋</div>
+                    No reports yet
+                  </div>
+                ) : (
+                  recentReports.map(report => (
+                    <div 
+                      key={report.id}
+                      style={{
+                        padding: '16px',
+                        borderBottom: '1px solid #F1F5F9',
+                        transition: 'background 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = '#F8FAFC'}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                        <div>
+                          <div style={{ fontWeight: '600', color: '#1E293B', fontSize: '14px' }}>
+                            {report.title || 'Untitled Report'}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#64748B', marginTop: '4px' }}>
+                            {report.bridge || report.bridgeId || 'Unknown Bridge'}
+                          </div>
+                        </div>
+                        <div style={{
+                          padding: '4px 12px',
+                          background: report.status === 'Pending' ? 'rgba(245, 158, 11, 0.1)' : 
+                                     report.status === 'Approved' ? 'rgba(16, 185, 129, 0.1)' : 
+                                     'rgba(239, 68, 68, 0.1)',
+                          color: report.status === 'Pending' ? '#D97706' : 
+                                 report.status === 'Approved' ? '#059669' : '#DC2626',
+                          borderRadius: '20px',
+                          fontSize: '12px',
+                          fontWeight: '600'
+                        }}>
+                          {report.status}
+                        </div>
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#94A3B8', display: 'flex', justifyContent: 'space-between' }}>
+                        <span>By: {report.userName || report.auditor || 'Anonymous'}</span>
+                        <span>{report.date ? new Date(report.date).toLocaleDateString() : 'Unknown date'}</span>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
+              
+              {reports.length > 5 && (
+                <button 
+                  onClick={() => window.location.href = '/admin/reports'}
+                  style={{
+                    width: '100%',
+                    marginTop: '16px',
+                    padding: '12px',
+                    background: 'transparent',
+                    color: '#0F766E',
+                    border: '1px solid #E2E8F0',
+                    borderRadius: '8px',
+                    fontSize: '14px',
+                    fontWeight: '500',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#F8FAFC';
+                    e.currentTarget.style.borderColor = '#0F766E';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                    e.currentTarget.style.borderColor = '#E2E8F0';
+                  }}
+                >
+                  View All Reports
+                </button>
+              )}
             </div>
 
+            {/* Bridge Health Summary */}
             <div style={{
               background: 'white',
               padding: '24px',
@@ -428,202 +382,296 @@ export default function Admin(){
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
                 <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
-                  Bridge Health Distribution
+                  Bridge Health Summary
                 </h3>
-                <select style={{ padding: '8px 12px', borderRadius: '8px', border: '1px solid #E2E8F0', fontSize: '14px' }}>
-                  <option>All Bridges</option>
-                  <option>By Region</option>
-                  <option>By Age</option>
-                </select>
+                <div style={{
+                  fontSize: '14px',
+                  color: '#64748B',
+                  background: '#F8FAFC',
+                  padding: '6px 12px',
+                  borderRadius: '20px'
+                }}>
+                  {totalBridges} Bridges
+                </div>
               </div>
-              <div style={{ height: '250px' }}>
-                <Bar data={barData} options={barOptions} />
+              
+              <div style={{ marginBottom: '20px' }}>
+                {Object.entries(healthDistribution).map(([status, count]) => {
+                  const percentage = totalBridges > 0 ? Math.round((count / totalBridges) * 100) : 0
+                  const getColor = (status) => {
+                    switch(status) {
+                      case 'EXCELLENT': return '#10B981'
+                      case 'GOOD': return '#22C55E'
+                      case 'FAIR': return '#F59E0B'
+                      case 'POOR': return '#F97316'
+                      case 'CRITICAL': return '#DC2626'
+                      default: return '#64748B'
+                    }
+                  }
+                  
+                  return (
+                    <div key={status} style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{
+                            width: '12px',
+                            height: '12px',
+                            background: getColor(status),
+                            borderRadius: '2px'
+                          }}></div>
+                          <span style={{ fontSize: '14px', color: '#1E293B' }}>{status}</span>
+                        </div>
+                        <div style={{ fontSize: '14px', fontWeight: '600', color: '#1E293B' }}>
+                          {count} ({percentage}%)
+                        </div>
+                      </div>
+                      <div style={{
+                        height: '8px',
+                        background: '#E2E8F0',
+                        borderRadius: '4px',
+                        overflow: 'hidden'
+                      }}>
+                        <div style={{
+                          width: `${percentage}%`,
+                          height: '100%',
+                          background: getColor(status),
+                          borderRadius: '4px',
+                          transition: 'width 1s ease'
+                        }}></div>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-            </div>
-
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '16px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-              border: '1px solid #E2E8F0'
-            }}>
-              <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
-                Temperature Monitoring
-              </h3>
-              <div style={{ height: '200px' }}>
-                <Line data={areaData} options={lineOptions} />
-              </div>
-            </div>
-
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '16px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-              border: '1px solid #E2E8F0'
-            }}>
-              <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
-                User Distribution
-              </h3>
-              <div style={{ height: '200px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Doughnut data={pieData} options={chartOptionsCommon} />
+              
+              <div style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '16px',
+                textAlign: 'center'
+              }}>
+                <div>
+                  <div style={{ fontSize: '20px', fontWeight: '700', color: '#10B981' }}>{goodBridges}</div>
+                  <div style={{ fontSize: '12px', color: '#64748B' }}>Good</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '20px', fontWeight: '700', color: '#F59E0B' }}>{fairBridges}</div>
+                  <div style={{ fontSize: '12px', color: '#64748B' }}>Fair</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '20px', fontWeight: '700', color: '#DC2626' }}>{criticalBridges}</div>
+                  <div style={{ fontSize: '12px', color: '#64748B' }}>Critical</div>
+                </div>
               </div>
             </div>
           </div>
 
-          {/* Data Tables */}
+          {/* Recent Users Table */}
           <div style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: '20px',
+            background: 'white',
+            padding: '24px',
+            borderRadius: '16px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+            border: '1px solid #E2E8F0',
             marginBottom: '24px'
           }}>
-            {/* Health Logs */}
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '16px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-              border: '1px solid #E2E8F0'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
-                  Real-time Sensor Logs
-                </h3>
-                <button style={{
-                  padding: '8px 16px',
-                  background: 'rgba(15, 118, 110, 0.1)',
-                  color: '#0F766E',
-                  border: '1px solid rgba(15, 118, 110, 0.2)',
-                  borderRadius: '8px',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  cursor: 'pointer'
-                }}>
-                  View All
-                </button>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
+                Recent Users
+              </h3>
+              <div style={{
+                fontSize: '14px',
+                color: '#64748B',
+                background: '#F8FAFC',
+                padding: '6px 12px',
+                borderRadius: '20px'
+              }}>
+                {totalUsers} Total Users
               </div>
-              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+            </div>
+            
+            <div style={{ maxHeight: '300px', overflow: 'auto' }}>
+              {recentUsers.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '40px 20px', color: '#64748B' }}>
+                  <div style={{ fontSize: '32px', marginBottom: '16px' }}>👤</div>
+                  No users found
+                </div>
+              ) : (
                 <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Bridge</th>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Strain</th>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Vibration</th>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Time</th>
+                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600' }}>User</th>
+                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Email</th>
+                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Role</th>
+                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600' }}>Last Active</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {mockHealthLogs.map(log => (
-                      <tr key={log.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                        <td style={{ padding: '12px', fontSize: '14px', color: '#1E293B' }}>
-                          <div style={{ fontWeight: '600' }}>{log.bridge}</div>
-                          <div style={{ fontSize: '12px', color: '#64748B' }}>{log.bridgeId}</div>
+                    {recentUsers.map(user => (
+                      <tr key={user.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
+                        <td style={{ padding: '12px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                            <div style={{
+                              width: '40px',
+                              height: '40px',
+                              background: 'linear-gradient(135deg, #0F766E, #3B82F6)',
+                              borderRadius: '50%',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'white',
+                              fontWeight: '600'
+                            }}>
+                              {(user.name || user.email || 'U').charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div style={{ fontWeight: '600', color: '#1E293B' }}>
+                                {user.name || 'Anonymous User'}
+                              </div>
+                            </div>
+                          </div>
                         </td>
-                        <td style={{ padding: '12px', fontSize: '14px', color: log.strain > 0.6 ? '#DC2626' : '#10B981' }}>
-                          {log.strain} µε
+                        <td style={{ padding: '12px', color: '#64748B' }}>
+                          {user.email || 'No email'}
                         </td>
-                        <td style={{ padding: '12px', fontSize: '14px', color: log.vibration > 4 ? '#F97316' : '#10B981' }}>
-                          {log.vibration} Hz
+                        <td style={{ padding: '12px' }}>
+                          <span style={{
+                            padding: '4px 12px',
+                            background: user.role === 'admin' ? 'rgba(15, 118, 110, 0.1)' : 
+                                       user.role === 'inspector' ? 'rgba(59, 130, 246, 0.1)' : 
+                                       'rgba(139, 92, 246, 0.1)',
+                            color: user.role === 'admin' ? '#0F766E' : 
+                                   user.role === 'inspector' ? '#3B82F6' : '#8B5CF6',
+                            borderRadius: '20px',
+                            fontSize: '12px',
+                            fontWeight: '600'
+                          }}>
+                            {user.role || 'user'}
+                          </span>
                         </td>
-                        <td style={{ padding: '12px', fontSize: '14px', color: '#64748B' }}>
-                          {log.ts}
+                        <td style={{ padding: '12px', color: '#64748B' }}>
+                          {user.lastLogin ? new Date(user.lastLogin).toLocaleDateString() : 'Never'}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
-              </div>
+              )}
             </div>
-
-            {/* ML Predictions */}
-            <div style={{
-              background: 'white',
-              padding: '24px',
-              borderRadius: '16px',
-              boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
-              border: '1px solid #E2E8F0'
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
-                  AI Health Predictions
-                </h3>
-                <button style={{
-                  padding: '8px 16px',
-                  background: 'rgba(15, 118, 110, 0.1)',
+            
+            {users.length > 5 && (
+              <button 
+                onClick={() => window.location.href = '/admin/users'}
+                style={{
+                  width: '100%',
+                  marginTop: '16px',
+                  padding: '12px',
+                  background: 'transparent',
                   color: '#0F766E',
-                  border: '1px solid rgba(15, 118, 110, 0.2)',
+                  border: '1px solid #E2E8F0',
                   borderRadius: '8px',
                   fontSize: '14px',
                   fontWeight: '500',
-                  cursor: 'pointer'
-                }}>
-                  Update Model
-                </button>
-              </div>
-              <div style={{ maxHeight: '300px', overflow: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid #E2E8F0' }}>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Bridge</th>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Health Index</th>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Confidence</th>
-                      <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {mockMl.map(pred => (
-                      <tr key={pred.id} style={{ borderBottom: '1px solid #F1F5F9' }}>
-                        <td style={{ padding: '12px', fontSize: '14px', color: '#1E293B', fontWeight: '600' }}>
-                          {pred.bridge}
-                        </td>
-                        <td style={{ padding: '12px' }}>
-                          <div style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            background: pred.status === 'critical' ? 'rgba(220, 38, 38, 0.1)' : 
-                                       pred.status === 'warning' ? 'rgba(249, 115, 22, 0.1)' : 
-                                       'rgba(16, 185, 129, 0.1)',
-                            color: pred.status === 'critical' ? '#DC2626' : 
-                                   pred.status === 'warning' ? '#F97316' : '#10B981',
-                            padding: '4px 12px',
-                            borderRadius: '20px',
-                            fontSize: '13px',
-                            fontWeight: '600'
-                          }}>
-                            {pred.healthIndex}
-                          </div>
-                        </td>
-                        <td style={{ padding: '12px', fontSize: '14px', color: '#64748B' }}>
-                          {Math.round(pred.confidence * 100)}%
-                        </td>
-                        <td style={{ padding: '12px' }}>
-                          <div style={{
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            background: pred.action.includes('Urgent') ? 'rgba(220, 38, 38, 0.1)' : 
-                                       pred.action.includes('Now') ? 'rgba(249, 115, 22, 0.1)' : 
-                                       'rgba(16, 185, 129, 0.1)',
-                            color: pred.action.includes('Urgent') ? '#DC2626' : 
-                                   pred.action.includes('Now') ? '#F97316' : '#10B981',
-                            padding: '4px 12px',
-                            borderRadius: '20px',
-                            fontSize: '13px',
-                            fontWeight: '600'
-                          }}>
-                            {pred.action}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                  cursor: 'pointer',
+                  transition: 'all 0.2s ease'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = '#F8FAFC';
+                  e.currentTarget.style.borderColor = '#0F766E';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'transparent';
+                  e.currentTarget.style.borderColor = '#E2E8F0';
+                }}
+              >
+                View All Users
+              </button>
+            )}
           </div>
 
-
+          {/* System Status */}
+          <div style={{
+            background: 'white',
+            padding: '24px',
+            borderRadius: '16px',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.05)',
+            border: '1px solid #E2E8F0'
+          }}>
+            <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', fontWeight: '600', color: '#1E293B' }}>
+              System Status
+            </h3>
+            
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '20px'
+            }}>
+              {[
+                { 
+                  label: 'API Status', 
+                  status: 'Online', 
+                  color: '#10B981',
+                  icon: '🔗',
+                  details: 'Connected to backend'
+                },
+                { 
+                  label: 'Database', 
+                  status: localStorage.getItem('bqi_reports') ? 'Online' : 'Offline', 
+                  color: localStorage.getItem('bqi_reports') ? '#10B981' : '#DC2626',
+                  icon: '💾',
+                  details: localStorage.getItem('bqi_reports') ? 'Local storage active' : 'No data'
+                },
+                { 
+                  label: 'Bridge Data', 
+                  status: bridges.length > 0 ? 'Loaded' : 'No Data', 
+                  color: bridges.length > 0 ? '#10B981' : '#F59E0B',
+                  icon: '🌉',
+                  details: `${bridges.length} bridges loaded`
+                },
+                { 
+                  label: 'Reports System', 
+                  status: reports.length > 0 ? 'Active' : 'Inactive', 
+                  color: reports.length > 0 ? '#10B981' : '#64748B',
+                  icon: '📋',
+                  details: `${reports.length} reports stored`
+                },
+              ].map((item, index) => (
+                <div key={index} style={{
+                  padding: '20px',
+                  background: '#F8FAFC',
+                  borderRadius: '12px',
+                  border: `1px solid ${item.color}30`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+                    <div style={{
+                      width: '40px',
+                      height: '40px',
+                      background: `${item.color}20`,
+                      borderRadius: '10px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '20px',
+                      color: item.color
+                    }}>
+                      {item.icon}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '14px', color: '#64748B' }}>
+                        {item.label}
+                      </div>
+                      <div style={{ fontSize: '16px', fontWeight: '700', color: item.color }}>
+                        {item.status}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#94A3B8' }}>
+                    {item.details}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

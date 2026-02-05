@@ -1,10 +1,12 @@
 import React, { useContext, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BridgesContext } from '../contexts/BridgesContext'
+import api from '../lib/api'
 
 export default function Login(){
   const { setUser } = useContext(BridgesContext)
   const [formData, setFormData] = useState({
+    name: '',
     email: '',
     password: '',
   })
@@ -23,7 +25,10 @@ export default function Login(){
   }
 
   const validateForm = () => {
-    const { email, password } = formData
+    const { name, email, password } = formData
+    if (isRegister && (!name || name.trim().length < 2)) {
+      return 'Please enter your full name'
+    }
     
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return 'Please enter a valid email address'
@@ -47,6 +52,49 @@ export default function Login(){
     return ''
   }
 
+  const getFriendlyErrorMessage = (error) => {
+    const errorMessage = error.message || error.toString();
+    
+    // Handle specific error patterns
+    if (errorMessage.includes('500') || errorMessage.includes('Internal Server Error')) {
+      if (isRegister) {
+        return 'Registration failed. The email might already be registered.';
+      } else {
+        return 'Invalid email or password. Please try again.';
+      }
+    }
+    
+    if (errorMessage.includes('404') || errorMessage.includes('Not Found')) {
+      return 'Service temporarily unavailable. Please try again later.';
+    }
+    
+    if (errorMessage.includes('Network error') || errorMessage.includes('fetch')) {
+      return 'Unable to connect to server. Please check your internet connection.';
+    }
+    
+    if (errorMessage.includes('401') || errorMessage.includes('Unauthorized')) {
+      return 'Invalid email or password. Please check your credentials.';
+    }
+    
+    if (errorMessage.includes('403') || errorMessage.includes('Forbidden')) {
+      return 'Access denied. Please contact administrator.';
+    }
+    
+    if (errorMessage.includes('409') || errorMessage.includes('Conflict')) {
+      return 'This email is already registered. Please sign in instead.';
+    }
+    
+    if (errorMessage.includes('400') || errorMessage.includes('Bad Request')) {
+      if (errorMessage.includes('email') || errorMessage.includes('password')) {
+        return 'Invalid email or password format.';
+      }
+      return 'Please check your information and try again.';
+    }
+    
+    // Generic fallback message
+    return 'An error occurred. Please try again.';
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     const validationError = validateForm()
@@ -56,81 +104,48 @@ export default function Login(){
     }
     
     setIsLoading(true)
+    setError('')
     
     try {
       if (isRegister) {
-        // Registration API call - only email and password
-        const response = await fetch('/api/auth/register', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email: formData.email,
-            password: formData.password,
-            role: 'user' // Always user for registration
-          })
+        // Backend expects /api/auth/signup and returns { userId }
+        const auth = await api.authSignup({
+          name: formData.name,
+          email: formData.email,
+          password: formData.password
         })
-        
-        const data = await response.json()
-        
-        if (!response.ok) {
-          throw new Error(data.message || 'Registration failed')
-        }
-        
-        // Store user data and token
-        localStorage.setItem('bqi_token', data.token)
-        localStorage.setItem('bqi_user', JSON.stringify(data.user))
-        setUser(data.user)
-        navigate('/user')
-        
+
+        // auth.userId is UUID - fetch full user
+        const user = await api.getUser(auth.userId)
+        // store token (use userId for existing code compatibility)
+        localStorage.setItem('bqi_token', auth.userId)
+        localStorage.setItem('bqi_user', JSON.stringify(user))
+        setUser(user)
+        navigate((user.role||'').toString().toLowerCase() === 'admin' ? '/admin' : '/user')
+
       } else {
-        // Login API call
-        const response = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email: formData.email,
-            password: formData.password
-          })
+        const auth = await api.authLogin({
+          email: formData.email,
+          password: formData.password
         })
-        
-        const data = await response.json()
-        
-        if (!response.ok) {
-          throw new Error(data.message || 'Login failed')
-        }
-        
-        // Store user data and token
-        localStorage.setItem('bqi_token', data.token)
-        localStorage.setItem('bqi_user', JSON.stringify(data.user))
-        setUser(data.user)
-        navigate(data.user.role === 'admin' ? '/admin' : '/user')
+
+        const user = await api.getUser(auth.userId)
+        localStorage.setItem('bqi_token', auth.userId)
+        localStorage.setItem('bqi_user', JSON.stringify(user))
+        setUser(user)
+        navigate((user.role||'').toString().toLowerCase() === 'admin' ? '/admin' : '/user')
       }
     } catch (error) {
-      setError(error.message || 'An error occurred. Please try again.')
-      console.error('Auth error:', error)
+      // Use friendly error messages
+      const friendlyError = getFriendlyErrorMessage(error);
+      setError(friendlyError);
       
-      // Fallback to mock data for demo purposes
-      if (process.env.NODE_ENV === 'development') {
-        const mockUser = {
-          id: Date.now(),
-          name: formData.email.split('@')[0],
-          email: formData.email,
-          role: formData.email.toLowerCase().includes('admin') ? 'admin' : 'user',
-          avatar: `https://ui-avatars.com/api/?name=${encodeURIComponent(formData.email.split('@')[0])}&background=0F766E&color=fff`
-        }
-        
-        localStorage.setItem('bqi_user', JSON.stringify(mockUser))
-        setUser(mockUser)
-        setIsLoading(false)
-        navigate(mockUser.role === 'admin' ? '/admin' : '/user')
-      }
+      // Log the actual error for debugging (in console only)
+      console.error('Auth error details:', error);
     } finally {
-      setIsLoading(false)
+      setIsLoading(false);
     }
+    
   }
 
   return (
@@ -272,6 +287,40 @@ export default function Login(){
 
           {/* Form */}
           <form onSubmit={handleSubmit} style={{ marginBottom: '24px' }}>
+            {/* Name Field (only for registration) */}
+            {isRegister && (
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{
+                  display: 'block',
+                  marginBottom: '8px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  color: '#1E293B'
+                }}>
+                  Full Name
+                </label>
+                <input
+                  type="text"
+                  name="name"
+                  value={formData.name}
+                  onChange={handleChange}
+                  required
+                  placeholder="Enter your full name"
+                  style={{
+                    width: '100%',
+                    padding: '14px',
+                    borderRadius: '12px',
+                    border: '1px solid #E2E8F0',
+                    background: '#F8FAFC',
+                    color: '#1E293B',
+                    fontSize: '15px',
+                    transition: 'all 0.3s ease',
+                    outline: 'none'
+                  }}
+                />
+              </div>
+            )}
+
             {/* Email Field */}
             <div style={{ marginBottom: '20px' }}>
               <label style={{
@@ -517,109 +566,7 @@ export default function Login(){
             </button>
           </div>
 
-          {/* Demo credentials */}
-          {!isRegister && process.env.NODE_ENV === 'development' && (
-            <div style={{
-              marginTop: '24px',
-              padding: '16px',
-              background: 'rgba(15, 118, 110, 0.05)',
-              borderRadius: '12px',
-              border: '1px dashed rgba(15, 118, 110, 0.3)'
-            }}>
-              <p style={{
-                color: '#64748B',
-                fontSize: '12px',
-                fontWeight: '600',
-                margin: '0 0 8px 0',
-                textAlign: 'center',
-                textTransform: 'uppercase',
-                letterSpacing: '0.5px'
-              }}>
-                Demo Credentials (Development Only)
-              </p>
-              <div style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '8px',
-                fontSize: '12px',
-                color: '#475569'
-              }}>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '8px'
-                }}>
-                  <span style={{ minWidth: '60px' }}>Admin:</span>
-                  <div style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    gap: '4px',
-                    flex: 1,
-                    minWidth: '200px'
-                  }}>
-                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                      <code style={{ 
-                        background: 'rgba(15, 118, 110, 0.1)', 
-                        padding: '4px 8px', 
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        flex: 1,
-                        minWidth: '150px'
-                      }}>
-                        admin@bqi.gov.np
-                      </code>
-                      <code style={{ 
-                        background: 'rgba(15, 118, 110, 0.1)', 
-                        padding: '4px 8px', 
-                        borderRadius: '4px',
-                        fontSize: '11px',
-                        flex: 1,
-                        minWidth: '80px'
-                      }}>
-                        admin123
-                      </code>
-                    </div>
-                    <div style={{ fontSize: '10px', color: '#94A3B8', fontStyle: 'italic' }}>
-                      Cannot be used for registration
-                    </div>
-                  </div>
-                </div>
-                <div style={{ 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '8px'
-                }}>
-                  <span style={{ minWidth: '60px' }}>User:</span>
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', flex: 1 }}>
-                    <code style={{ 
-                      background: 'rgba(15, 118, 110, 0.1)', 
-                      padding: '4px 8px', 
-                      borderRadius: '4px',
-                      fontSize: '11px',
-                      flex: 1,
-                      minWidth: '150px'
-                    }}>
-                      user@example.com
-                    </code>
-                    <code style={{ 
-                      background: 'rgba(15, 118, 110, 0.1)', 
-                      padding: '4px 8px', 
-                      borderRadius: '4px',
-                      fontSize: '11px',
-                      flex: 1,
-                      minWidth: '80px'
-                    }}>
-                      anypassword
-                    </code>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+
         </div>
 
         {/* Footer */}

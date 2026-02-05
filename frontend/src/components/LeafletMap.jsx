@@ -1,21 +1,17 @@
-﻿import React, { useEffect, useRef, useState } from 'react'
+﻿import React, { useEffect, useRef, useState, useContext } from 'react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import 'leaflet.markercluster'
-import { classification } from '../utils/bqi'
+import { BridgesContext } from '../contexts/BridgesContext'
 import { useNavigate } from 'react-router-dom'
 
-function emojiForScore(s) {
-  if (s >= 80) return '😀'
-  if (s >= 60) return '🙂'
-  if (s >= 40) return '😐'
-  if (s >= 20) return '🙁'
-  return '😢'
-}
+import api from '../lib/api'
 
-const NAVBAR_HEIGHT = 64
+
+
+// NOTE: BQI calculator is deprecated. Use API-provided `bqi` and `status` fields.
 
 // Helper function to lighten hex color
 function lighten(hex, amt) {
@@ -44,30 +40,69 @@ const hexToRgba = (hex, a = 0.5) => {
   } catch (e) { return hex }
 }
 
-// Bridge data with dates
-const PROVIDED_BRIDGES = [
-  { name: "Sundarijal Bridge", lat: 27.8015, lon: 85.3912, bqi: 82, created: "2023-01-15", updated: "2024-03-10" },
-  { name: "Kalanki Bridge", lat: 27.6939, lon: 85.2815, bqi: 76, created: "2022-11-20", updated: "2024-02-28" },
-  { name: "Koteshwor Bridge", lat: 27.6789, lon: 85.3498, bqi: 61, created: "2023-03-05", updated: "2024-03-01" },
-  { name: "Balaju Bridge", lat: 27.7321, lon: 85.3014, bqi: 55, created: "2022-09-12", updated: "2024-02-15" },
-  { name: "Chabahil Bridge", lat: 27.7179, lon: 85.3490, bqi: 44, created: "2023-02-18", updated: "2024-02-25" },
-  { name: "Teku Bridge", lat: 27.6932, lon: 85.3091, bqi: 38, created: "2022-12-05", updated: "2024-03-05" },
-  { name: "Tripureshwor Bridge", lat: 27.6938, lon: 85.3175, bqi: 69, created: "2023-01-30", updated: "2024-02-20" },
-  { name: "Pulchowk Bridge", lat: 27.6725, lon: 85.3251, bqi: 23, created: "2022-10-22", updated: "2024-03-08" },
-  { name: "Thapathali Bridge", lat: 27.6998, lon: 85.3118, bqi: 90, created: "2023-04-12", updated: "2024-02-28" },
-  { name: "Kantipath Bridge", lat: 27.7046, lon: 85.3170, bqi: 33, created: "2022-08-15", updated: "2024-03-03" },
-  { name: "Bagmati Bridge", lat: 27.6780, lon: 85.3206, bqi: 47, created: "2023-02-28", updated: "2024-02-18" }
-].map((b, i) => ({
-  id: 'b-' + (i + 1),
-  name: b.name,
-  lat: b.lat,
-  lng: b.lon,
-  bqi: b.bqi,
-  createdAt: b.created + 'T00:00:00.000Z',
-  updatedAt: b.updated + 'T00:00:00.000Z'
-}))
+// Fix for your API's swapped coordinates
+const normalizeLatLng = (src) => {
+  const lat = src?.longitude  // This is actually latitude
+  const lng = src?.latitude   // This is actually longitude
+  
+  return { 
+    latitude: lat !== undefined && lat !== '' ? Number(lat) : null,
+    longitude: lng !== undefined && lng !== '' ? Number(lng) : null
+  }
+}
+
+// Prefer API-provided BQI and status. Do not calculate locally.
+const getBQIFromBridge = (bridge) => {
+  if (bridge == null) return null
+  return bridge.bqi !== undefined && bridge.bqi !== null ? Number(bridge.bqi) : null
+}
+
+// Map status text to colors (used for marker styling)
+const getColorForStatus = (status) => {
+  const s = (status || '').toString().toUpperCase()
+  switch (s) {
+    case 'EXCELLENT': return '#10B981'
+    case 'GOOD': return '#22C55E'
+    case 'FAIR': return '#F59E0B'
+    case 'POOR': return '#EF4444'
+    case 'CRITICAL': return '#DC2626'
+    default: return '#64748B'
+  }
+}
+
+// Also provide a numeric-to-color fallback when only numeric BQI is available
+const getColorForNumericBQI = (bqi) => {
+  if (bqi === null || bqi === undefined || isNaN(bqi)) return '#64748B'
+  if (bqi >= 80) return '#10B981'
+  if (bqi >= 70) return '#22C55E'
+  if (bqi >= 60) return '#F59E0B'
+  if (bqi >= 50) return '#EF4444'
+  return '#DC2626'
+}
+
+// Toast component for notifications
+function Toast({ msg }) {
+  return (
+    <div style={{
+      position: 'fixed',
+      top: '20px',
+      right: '20px',
+      background: msg.type === 'success' ? '#10B981' : '#DC2626',
+      color: 'white',
+      padding: '12px 24px',
+      borderRadius: '8px',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+      zIndex: 10000,
+      animation: 'slideIn 0.3s ease',
+      maxWidth: '400px'
+    }}>
+      {msg.text}
+    </div>
+  )
+}
 
 export default function LeafletMap() {
+  const { bridges = [], refreshBridges, user } = useContext(BridgesContext)
   const mapRef = useRef(null)
   const containerRef = useRef(null)
   const markersRef = useRef(null)
@@ -75,204 +110,249 @@ export default function LeafletMap() {
 
   const [coords, setCoords] = useState({ lat: 27.7172, lng: 85.3240, zoom: 13 })
   const [query, setQuery] = useState(() => localStorage.getItem('bqi_query') || '')
-  const [healthFilter, setHealthFilter] = useState(() => localStorage.getItem('bqi_health') || 'all')
+  const [statusFilter, setStatusFilter] = useState(() => localStorage.getItem('bqi_status') || 'all')
   const [showReportForm, setShowReportForm] = useState(false)
   const [selectedBridge, setSelectedBridge] = useState(null)
   const [isFilterExpanded, setIsFilterExpanded] = useState(false)
-  const [currentUser, setCurrentUser] = useState(null)
-  const [sidebarOffset, setSidebarOffset] = useState(20)
+  const [isLoading, setIsLoading] = useState(false)
+  const [visibleBridgesCount, setVisibleBridgesCount] = useState(0)
+  const [lastUpdateTime, setLastUpdateTime] = useState(null)
+  const [toasts, setToasts] = useState([])
+  const [detailsCache, setDetailsCache] = useState({})
+  const [formData, setFormData] = useState({
+    bridgeId: '',
+    title: '',
+    description: '',
+    issueType: ''
+  })
 
-  // Get current user on component mount
-  useEffect(() => {
-    const user = JSON.parse(localStorage.getItem('bqi_user') || 'null')
-    setCurrentUser(user)
-  }, [])
+  const currentRoleLower = (user?.role || '').toString().toLowerCase()
+  const currentIsAdmin = currentRoleLower === 'admin'
 
-  // adjust overlay offset when sidebar toggles or window resizes
-  useEffect(() => {
-    const computeOffset = () => {
-      try {
-        const has = document.body.classList.contains('bqi-sidebar-open')
-        if (has && window.innerWidth >= 1024) setSidebarOffset(20 + 280)
-        else setSidebarOffset(20)
-      } catch (e) { setSidebarOffset(20) }
-    }
-    computeOffset()
-    window.addEventListener('resize', computeOffset)
-    window.addEventListener('bqi-sidebar-changed', computeOffset)
-    return () => { window.removeEventListener('resize', computeOffset); window.removeEventListener('bqi-sidebar-changed', computeOffset) }
-  }, [])
+  // Toast function
+  const pushToast = (text, type = 'success') => {
+    const t = { id: Date.now(), text, type }
+    setToasts(s => [t, ...s])
+    setTimeout(() => setToasts(s => s.filter(x => x.id !== t.id)), 3800)
+  }
 
-  // Function to create marker icon based on BQI score
-  const makeIcon = (bqi) => {
-    // Determine color based on BQI score following the rules
-    let color
-    if (bqi >= 80) color = '#2ecc71'        // Green
-    else if (bqi >= 60) color = '#3498db'   // Blue
-    else if (bqi >= 40) color = '#f1c40f'   // Yellow
-    else if (bqi >= 20) color = '#e67e22'   // Orange
-    else color = '#e74c3c'                  // Red
+  // Function to create marker icon based on BQI
+  const makeIcon = (bridge) => {
+    const bqi = getBQIFromBridge(bridge)
+    const color = getColorForNumericBQI(bqi) || getColorForStatus(bridge.status)
     
     const light = lighten(color, 0.35)
     const shadow1 = hexToRgba(color, 0.55)
     const shadow2 = hexToRgba(color, 0.28)
     
+    // Add BQI number inside marker
     const html = `
       <div class="glow-marker" 
            style="background:radial-gradient(circle at 30% 30%, ${light}, ${color});
                   box-shadow: 0 0 12px ${shadow1}, 0 0 24px ${shadow2};
-                  border: 2px solid rgba(255,255,255,0.8)">
+                  border: 2px solid rgba(255,255,255,0.8);
+                  display: flex;
+                  align-items: center;
+                  justify-content: center;
+                  font-weight: bold;
+                  font-size: 11px;
+                  color: white;
+                  text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
+        ${Math.round(bqi)}
       </div>
     `
     
     return L.divIcon({
       className: 'bridge-marker',
       html,
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
+      iconSize: [32, 32],
+      iconAnchor: [16, 16]
     })
   }
 
-  // Function to create popup content - UPDATED: Hide submit report for admin
+  // Function to create popup content - REMOVED VIEW DETAILS BUTTON
   const createPopupContent = (b) => {
-    const cls = classification(b.bqi ?? 0)
-    const status = cls.label === 'Safe' ? 'Good' : cls.label
-    const emoji = emojiForScore(b.bqi || 0)
-    const meterWidth = Math.max(4, Math.min(100, b.bqi || 0))
-    
-    // Format dates
-    const formatDate = (dateString) => {
-      try {
-        return new Date(dateString).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric'
-        })
-      } catch {
-        return 'N/A'
-      }
+    const n = normalizeLatLng(b)
+    const bqi = getBQIFromBridge(b)
+    const status = b.status || 'UNKNOWN'
+    const lat = n.latitude
+    const lng = n.longitude
+
+    // Get last update time
+    let lastUpdateText = ''
+    if (b.updatedAt) {
+      const updateTime = new Date(b.updatedAt)
+      lastUpdateText = `Last updated: ${updateTime.toLocaleDateString()} ${updateTime.toLocaleTimeString()}`
     }
-    
-    const createdDate = formatDate(b.createdAt)
-    const updatedDate = formatDate(b.updatedAt)
-    
-    // Check if current user is admin
-    const isAdmin = currentUser && currentUser.role === 'admin'
-    
+
     return `
-      <div style="min-width:260px;font-family:Inter,Arial;padding:8px">
-        <div style="font-weight:700;margin-bottom:8px;font-size:16px;color:#333">${b.name}</div>
+      <div style="min-width:280px;font-family:Inter,Arial;padding:16px">
+        <div style="font-weight:700;margin-bottom:10px;font-size:18px;color:#222">${b.name}</div>
         
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
-          <div style="font-size:12px;color:#666">
-            <div style="font-weight:500;margin-bottom:2px">Location</div>
-            <div>${b.lat.toFixed(4)}, ${b.lng.toFixed(4)}</div>
-          </div>
-          
-          <div style="font-size:12px;color:#666">
-            <div style="font-weight:500;margin-bottom:2px">Current BQI</div>
-            <div style="font-weight:700;color:#333">${b.bqi ?? '—'}</div>
-          </div>
-        </div>
-        
-        <div style="background:#f8f9fa;border-radius:8px;padding:12px;margin-bottom:12px">
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <div style="font-size:12px;color:#666">
-              <div style="font-weight:500;margin-bottom:2px">Health Status</div>
-              <div style="font-weight:600;color:${cls.color}">${status}</div>
+        <!-- BQI Score Display -->
+        <div style="margin-bottom:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <div style="font-size:14px;color:#444">
+              <strong>BQI Score:</strong>
             </div>
-            
-            <div style="font-size:12px;color:#666">
-              <div style="font-weight:500;margin-bottom:2px">Score Meter</div>
-              <div style="font-size:20px">${emoji}</div>
+              <div style="
+              font-size:18px;
+              font-weight:700;
+              color:${getColorForNumericBQI(bqi)};
+              background:${getColorForNumericBQI(bqi)}20;
+              padding:4px 12px;
+              border-radius:20px;
+              border: 2px solid ${getColorForNumericBQI(bqi)}40;
+            ">
+              ${bqi !== null && bqi !== undefined ? bqi + '/100' : '—'}
             </div>
           </div>
-          
-          <div style="background:#e9ecef;border-radius:6px;height:8px;overflow:hidden;margin-bottom:8px">
-            <div style="width:${meterWidth}%;height:100%;background:${cls.color};transition:width 0.3s"></div>
+          <div style="font-size:13px;color:#666">
+            <strong>Status:</strong> <span style="color:${getColorForStatus(status)};font-weight:500">${status}</span>
           </div>
-          
-          <div style="display:flex;justify-content:space-between;font-size:11px;color:#888">
-            <span>Created: ${createdDate}</span>
-            <span>Updated: ${updatedDate}</span>
-          </div>
+          ${lastUpdateText ? `<div style="font-size:11px;color:#888;margin-top:4px">${lastUpdateText}</div>` : ''}
         </div>
         
-        ${!isAdmin ? `
-          <button id="submit-report-btn" 
-                  data-bridge-id="${b.id}"
-                  data-bridge-name="${b.name}"
-                  style="width:100%;background:linear-gradient(90deg,#1f6feb,#3fb0ff);
-                         border:none;color:#fff;padding:10px 16px;border-radius:8px;
-                         cursor:pointer;font-weight:500;font-size:14px;transition:all 0.2s">
-            Submit Report
-          </button>
-        ` : `
-          <div style="
-            width:100%;
-            background:linear-gradient(90deg,#f8f9fa,#e9ecef);
-            border:none;
-            color:#6c757d;
-            padding:10px 16px;
-            border-radius:8px;
-            font-weight:500;
-            font-size:14px;
-            text-align:center;
-            border:1px solid #dee2e6;
-          ">
-            <span style="display:inline-block;margin-right:8px">👑</span>
-            Admin Mode - View Only
-          </div>
-        `}
+        <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px;font-size:12px;color:#555">
+          <div><strong>ID:</strong> ${b.id}</div>
+          <div><strong>Coordinates:</strong> ${lat?.toFixed(5) || '—'}, ${lng?.toFixed(5) || '—'}</div>
+        </div>
+        
+        <div style="display:flex;gap:8px">
+          ${!currentIsAdmin ? `<button id="submit-report-btn" data-bridge-id="${b.id}" style="width:100%;padding:10px 14px;border-radius:8px;border:1px solid #e6edf8;background:linear-gradient(90deg,#f8fbff,#fff);cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s;color:#333;">Report Issue</button>` : ''}
+        </div>
       </div>
     `
   }
 
-  // Handle report form submission
-  const handleSubmitReport = (e) => {
-    e.preventDefault()
+  // Update the updateMapMarkers function
+  const updateMapMarkers = () => {
+    const map = mapRef.current
+    const cluster = markersRef.current
     
-    const formData = new FormData(e.target)
-    const reportData = {
-      id: Date.now(),
-      bridgeId: selectedBridge.id,
-      bridgeName: selectedBridge.name,
-      issueType: formData.get('issueType'),
-      title: formData.get('title'),
-      description: formData.get('description'),
-      timestamp: new Date().toISOString(),
-      status: 'submitted'
+    if (!map || !cluster) return
+    
+    try {
+      cluster.clearLayers()
+    } catch (e) {
+      console.error('Failed to clear cluster layers:', e)
     }
     
-    // Save to localStorage
-    const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
-    reports.push(reportData)
-    localStorage.setItem('bqi_reports', JSON.stringify(reports))
+    // Use bridges from context
+    let bridgesToDisplay = bridges || []
     
-    // Show success message
-    setShowReportForm('success')
+    if (bridgesToDisplay.length === 0) {
+      console.warn('No bridges from context, checking if loading...')
+      return
+    }
     
-    // Reset after 3 seconds
-    setTimeout(() => {
-      setShowReportForm(false)
-      setSelectedBridge(null)
-    }, 3000)
+    const filteredBridges = bridgesToDisplay.filter(b => {
+      // Search filter
+      if (query && !b.name?.toLowerCase().includes(query.toLowerCase())) {
+        return false
+      }
+      
+      // Status filter - use API-provided status
+      // Prefer detailsCache status when available
+      const mergedStatus = (detailsCache[b.id] && detailsCache[b.id].status) || b.status || ''
+      if (statusFilter !== 'all') {
+        return mergedStatus.toLowerCase() === statusFilter.toLowerCase()
+      }
+      
+      return true
+    })
+    
+    let validBridgesCount = 0
+    
+    filteredBridges.forEach(b => {
+      // Merge API-fetched details when available
+      const merged = { ...(b || {}), ...(detailsCache[b.id] || {}) }
+
+      // Use normalized coordinates (swap longitude/latitude)
+      const n = normalizeLatLng(merged)
+      let lat = n.latitude
+      let lng = n.longitude
+      
+      // Skip bridges with invalid coordinates
+      if (!lat || !lng || isNaN(lat) || isNaN(lng)) {
+        console.warn(`Invalid coordinates for bridge ${b.id}:`, lat, lng)
+        return
+      }
+      
+      // Check if coordinates are valid for Nepal
+      const isLatValid = lat >= 26.3 && lat <= 30.5
+      const isLngValid = lng >= 80.0 && lng <= 88.3
+      
+      if (!isLatValid || !isLngValid) {
+        // Try the original (unswapped) coordinates as a fallback
+        const originalLat = b.latitude
+        const originalLng = b.longitude
+        
+        if (originalLat >= 26.3 && originalLat <= 30.5 && 
+            originalLng >= 80.0 && originalLng <= 88.3) {
+          lat = originalLat
+          lng = originalLng
+        } else {
+          return
+        }
+      }
+      
+      validBridgesCount++
+      const icon = makeIcon(merged)
+      const marker = L.marker([lat, lng], { icon, title: merged.name })
+
+      marker.bindPopup(createPopupContent(merged))
+
+      // Handle popup events
+      marker.on('popupopen', (e) => {
+        const popupEl = e.popup.getElement()
+        const submitBtn = popupEl.querySelector('#submit-report-btn')
+
+        if (submitBtn && !currentIsAdmin) {
+          submitBtn.onclick = (event) => {
+            event.preventDefault()
+            if (!user) {
+              navigate('/login')
+              return
+            }
+
+            if (mapRef.current) mapRef.current.closePopup()
+            setSelectedBridge(merged)
+            setShowReportForm(true)
+          }
+        }
+      })
+
+      cluster.addLayer(marker)
+    })
+    
+    setVisibleBridgesCount(validBridgesCount)
+    console.log(`Map - Added ${validBridgesCount} markers with BQI`)
+    
+    if (map.hasLayer(cluster)) {
+      map.removeLayer(cluster)
+      map.addLayer(cluster)
+    }
+    
+    // If we have bridges, fit bounds to show all markers
+    if (validBridgesCount > 0 && cluster.getLayers().length > 0) {
+      try {
+        const bounds = cluster.getBounds()
+        if (bounds.isValid()) {
+          map.fitBounds(bounds, { padding: [50, 50] })
+        }
+      } catch (e) {
+        console.error('Error fitting bounds:', e)
+      }
+    } else {
+      console.warn('No valid markers to display')
+    }
+    
+    // Set last update time
+    setLastUpdateTime(new Date().toISOString())
   }
 
-  const saveReport = (reportData) => {
-    const reports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
-    reports.push(reportData)
-    localStorage.setItem('bqi_reports', JSON.stringify(reports))
-    
-    setShowReportForm('success')
-    
-    setTimeout(() => {
-      setShowReportForm(false)
-      setSelectedBridge(null)
-    }, 3000)
-  }
-
-  // Initialize map
+  // Initialize map - FIXED ZOOMING ISSUE
   useEffect(() => {
     if (!containerRef.current) return
     
@@ -288,69 +368,93 @@ export default function LeafletMap() {
       delete window._leaflet_maps[cid]
     }
     
+    // Initialize map with Nepal bounds - IMPORTANT: Changed initial zoom to 8 (was 13)
     const map = L.map(container, {
       center: [27.7172, 85.3240],
-      zoom: 13,
+      zoom: 8, // CHANGED FROM 13 TO 8 for better initial view
       minZoom: 6,
-      maxBounds: [[26.3, 80.0], [30.5, 88.3]]
+      maxZoom: 18,
+      maxBounds: [[26.3, 80.0], [30.5, 88.3]], // Nepal bounds
+      maxBoundsViscosity: 1.0
     })
     
     mapRef.current = map
     window._leaflet_maps[cid] = map
     
+    // Add OpenStreetMap tiles
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '&copy; OpenStreetMap contributors',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       maxZoom: 19
     }).addTo(map)
     
+    // Improved marker cluster configuration (showing count like in screenshot)
     const markerCluster = L.markerClusterGroup({
       chunkedLoading: true,
       showCoverageOnHover: false,
-      maxClusterRadius: 50
+      maxClusterRadius: 40,
+      spiderfyOnMaxZoom: true,
+      disableClusteringAtZoom: 16, // FIX: Changed from 15 to 16
+      zoomToBoundsOnClick: true, // Enables zoom when clicking cluster
+      iconCreateFunction: function(cluster) {
+        const childMarkers = cluster.getAllChildMarkers()
+        const count = childMarkers.length
+        
+        // Calculate average BQI for the cluster
+        const bqis = childMarkers.map(marker => {
+          const bridgeName = marker.options.title
+          const bridge = bridges.find(b => b.name === bridgeName)
+          const id = bridge?.id
+          const det = id ? detailsCache[id] : null
+          const val = det && det.bqi !== undefined && det.bqi !== null ? Number(det.bqi) : (bridge && bridge.bqi !== undefined && bridge.bqi !== null ? Number(bridge.bqi) : null)
+          return val
+        }).filter(x => x !== null)
+        const avgBqi = bqis.length ? Math.round(bqis.reduce((a, b) => a + b, 0) / bqis.length) : null
+        const color = avgBqi !== null ? getColorForNumericBQI(avgBqi) : '#64748B'
+        const lightColor = lighten(color, 0.4)
+        
+        // Determine size based on count
+        let size = 40
+        if (count > 10) size = 50
+        if (count > 20) size = 60
+        
+        // Create cluster icon with count (like in screenshot with "6", "4")
+        return L.divIcon({
+          html: `
+            <div class="cluster-icon" style="
+              width: ${size}px;
+              height: ${size}px;
+              background: radial-gradient(circle at 30% 30%, ${lightColor}, ${color});
+              border-radius: 50%;
+              border: 3px solid white;
+              box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              color: white;
+              font-weight: bold;
+              position: relative;
+              cursor: pointer;
+            ">
+              <div style="font-size: ${count > 9 ? '16px' : '18px'}; line-height: 1;">${count}</div>
+              <div style="font-size: 9px; opacity: 0.9; margin-top: -2px;">bridge${count !== 1 ? 's' : ''}</div>
+            </div>
+          `,
+          className: 'cluster-marker',
+          iconSize: L.point(size, size),
+          iconAnchor: [size / 2, size / 2]
+        })
+      }
     })
     
     markersRef.current = markerCluster
     
-    PROVIDED_BRIDGES.forEach(b => {
-      const icon = makeIcon(b.bqi)
-      const marker = L.marker([b.lat, b.lng], { icon, title: b.name })
-      
-      marker.bindPopup(createPopupContent(b))
-      
-      marker.on('popupopen', (e) => {
-        const popupEl = e.popup.getElement()
-        const submitBtn = popupEl.querySelector('#submit-report-btn')
-        
-        if (submitBtn) {
-          submitBtn.addEventListener('click', (event) => {
-            event.preventDefault()
-            const bridgeId = submitBtn.getAttribute('data-bridge-id')
-            const bridgeName = submitBtn.getAttribute('data-bridge-name')
-            const bridge = PROVIDED_BRIDGES.find(br => br.id === bridgeId)
-            
-            const user = JSON.parse(localStorage.getItem('bqi_user') || 'null')
-            if (!user) {
-              navigate('/login')
-              return
-            }
-            
-            // Check if user is admin - should not happen since button won't show for admin
-            if (user.role === 'admin') {
-              return
-            }
-            
-            map.closePopup()
-            setSelectedBridge(bridge)
-            setShowReportForm(true)
-          })
-        }
-      })
-      
-      markerCluster.addLayer(marker)
-    })
+    // Add markers to cluster
+    updateMapMarkers()
     
     map.addLayer(markerCluster)
     
+    // Update coordinates on map move
     const onMove = () => {
       const c = map.getCenter()
       setCoords({
@@ -363,6 +467,23 @@ export default function LeafletMap() {
     map.on('move', onMove)
     map.on('zoom', onMove)
     
+    // Handle cluster click to zoom (additional functionality)
+    markerCluster.on('clustermouseover', (e) => {
+      const count = e.layer.getChildCount()
+      e.layer.bindTooltip(
+        `${count} bridge${count !== 1 ? 's' : ''} - Click to zoom in`,
+        { 
+          direction: 'top',
+          offset: L.point(0, -25)
+        }
+      ).openTooltip()
+    })
+    
+    markerCluster.on('clustermouseout', (e) => {
+      e.layer.closeTooltip()
+    })
+    
+    // Invalidate size after a delay to ensure proper rendering
     setTimeout(() => {
       try { map.invalidateSize() } catch (e) { }
     }, 100)
@@ -375,86 +496,66 @@ export default function LeafletMap() {
         delete window._leaflet_maps[cid]
       }
     }
-  }, [navigate, currentUser]) // Added currentUser dependency
+  }, [navigate, user])
   
-  // Handle filtering
+  // Update markers when bridges, filters, or user changes
   useEffect(() => {
-    const map = mapRef.current
-    const cluster = markersRef.current
-    
-    if (!map || !cluster) return
-    
-    try {
-      cluster.clearLayers()
-    } catch (e) {
-      console.error('Failed to clear cluster layers:', e)
+    if (mapRef.current && markersRef.current) {
+      console.log('Map - Updating markers due to change in bridges/filters')
+      updateMapMarkers()
     }
-    
-    const filteredBridges = PROVIDED_BRIDGES.filter(b => {
-      if (query && !b.name.toLowerCase().includes(query.toLowerCase())) {
-        return false
-      }
-      
-      if (healthFilter !== 'all') {
-        const cls = classification(b.bqi ?? 0)
-        const status = cls.label === 'Safe' ? 'Good' : cls.label
-        
-        switch (healthFilter) {
-          case 'good': return status === 'Good'
-          case 'moderate': return status === 'Moderate'
-          case 'critical': return status === 'Critical'
-          default: return true
-        }
-      }
-      
-      return true
-    })
-    
-    filteredBridges.forEach(b => {
-      const icon = makeIcon(b.bqi)
-      const marker = L.marker([b.lat, b.lng], { icon, title: b.name })
-      
-      marker.bindPopup(createPopupContent(b))
-      
-      marker.on('popupopen', (e) => {
-        const popupEl = e.popup.getElement()
-        const submitBtn = popupEl.querySelector('#submit-report-btn')
-        
-        if (submitBtn) {
-          submitBtn.addEventListener('click', (event) => {
-            event.preventDefault()
-            const bridgeId = submitBtn.getAttribute('data-bridge-id')
-            const bridgeName = submitBtn.getAttribute('data-bridge-name')
-            const bridge = PROVIDED_BRIDGES.find(br => br.id === bridgeId)
-            
-            const user = JSON.parse(localStorage.getItem('bqi_user') || 'null')
-            if (!user) {
-              navigate('/login')
-              return
-            }
-            
-            // Check if user is admin - should not happen since button won't show for admin
-            if (user.role === 'admin') {
-              return
-            }
-            
-            if (mapRef.current) {
-              mapRef.current.closePopup()
-            }
-            setSelectedBridge(bridge)
-            setShowReportForm(true)
-          })
-        }
-      })
-      
-      cluster.addLayer(marker)
-    })
-    
-    if (map.hasLayer(cluster)) {
-      map.removeLayer(cluster)
-      map.addLayer(cluster)
+  }, [bridges, query, statusFilter, user])
+  
+  // Listen for health updates
+  useEffect(() => {
+    const handleHealthUpdated = (event) => {
+      console.log('Map - Received health update:', event.detail)
+      updateMapMarkers()
     }
-  }, [query, healthFilter, navigate, currentUser]) // Added currentUser dependency
+
+    const handleBridgesUpdated = () => {
+      console.log('Map - Received bridges-updated event')
+      if (refreshBridges && typeof refreshBridges === 'function') {
+        refreshBridges()
+      } else {
+        updateMapMarkers()
+      }
+    }
+
+    window.addEventListener('bqi-health-updated', handleHealthUpdated)
+    window.addEventListener('bqi-bridges-updated', handleBridgesUpdated)
+    
+    return () => {
+      window.removeEventListener('bqi-health-updated', handleHealthUpdated)
+      window.removeEventListener('bqi-bridges-updated', handleBridgesUpdated)
+    }
+  }, [refreshBridges])
+
+  // Fetch per-bridge details (bqi/status) and cache them to avoid recalculating
+  useEffect(() => {
+    let mounted = true
+    const ids = (bridges || []).map(b => b.id).filter(Boolean)
+    const missing = ids.filter(id => !detailsCache[id])
+    if (missing.length === 0) return
+
+    const fetchDetails = async () => {
+      try {
+        const promises = missing.map(id => api.getBridge(id).then(d => ({ id, d })).catch(() => ({ id, d: null })))
+        const results = await Promise.all(promises)
+        if (!mounted) return
+        setDetailsCache(prev => {
+          const next = { ...prev }
+          results.forEach(r => { if (r.d) next[r.id] = r.d })
+          return next
+        })
+      } catch (e) {
+        console.error('Error fetching bridge details:', e)
+      }
+    }
+
+    fetchDetails()
+    return () => { mounted = false }
+  }, [bridges])
   
   // Persist filters to localStorage
   useEffect(() => {
@@ -462,13 +563,132 @@ export default function LeafletMap() {
   }, [query])
   
   useEffect(() => {
-    localStorage.setItem('bqi_health', healthFilter)
-  }, [healthFilter])
+    localStorage.setItem('bqi_status', statusFilter)
+  }, [statusFilter])
   
+  // Auto-refresh BQI every 5 minutes
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (refreshBridges && typeof refreshBridges === 'function') {
+        console.log('Auto-refreshing bridges and BQI...')
+        refreshBridges()
+      }
+    }, 5 * 60 * 1000) // 5 minutes
+    
+    return () => clearInterval(interval)
+  }, [refreshBridges])
+  
+  // Handle form input changes
+  const handleInputChange = (e) => {
+    const { name, value } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }))
+  }
+  
+  // Handle report submission - USING YOUR EXACT METHOD
+  const handleSubmitReport = async (e) => {
+    e.preventDefault()
+    
+    if (!selectedBridge) {
+      pushToast('No bridge selected', 'error')
+      return
+    }
+    
+    if (!formData.title.trim()) {
+      pushToast('Title is required', 'error')
+      return
+    }
+    if (!formData.description.trim()) {
+      pushToast('Description is required', 'error')
+      return
+    }
+    if (!formData.issueType) {
+      pushToast('Please select an issue type', 'error')
+      return
+    }
+
+    setIsLoading(true)
+
+    try {
+      // Get current user info
+      const currentUser = JSON.parse(localStorage.getItem('bqi_user') || '{}')
+      const userName = currentUser.name || 'Anonymous User'
+      const userEmail = currentUser.email || ''
+
+      if (!userEmail) {
+        pushToast('User not found. Please login again.', 'error')
+        return
+      }
+
+      // Create new report using YOUR EXACT STRUCTURE
+      const newReport = {
+        id: `report_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        bridgeId: selectedBridge.id,
+        bridge: selectedBridge.name,
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        summary: formData.title.trim(),
+        issueType: formData.issueType,
+        category: formData.issueType.charAt(0).toUpperCase() + formData.issueType.slice(1),
+        status: 'Pending',
+        date: new Date().toISOString().split('T')[0],
+        submitted: new Date().toISOString(),
+        timestamp: new Date().toISOString(),
+        auditor: userName,
+        userName: userName,
+        userEmail: userEmail, // This is the key for user-specific filtering
+        estimatedCost: 'To be determined',
+        estimatedTime: 'To be determined'
+      }
+
+      // Save to main reports storage - YOUR EXACT METHOD
+      const allReports = JSON.parse(localStorage.getItem('bqi_reports') || '[]')
+      const updatedAllReports = [newReport, ...allReports]
+      localStorage.setItem('bqi_reports', JSON.stringify(updatedAllReports))
+
+      // Dispatch event for other components
+      window.dispatchEvent(new CustomEvent('bqi-report-submitted', { 
+        detail: { report: newReport, bridge: selectedBridge } 
+      }))
+
+      // Reset form
+      setFormData({
+        bridgeId: '',
+        title: '',
+        description: '',
+        issueType: ''
+      })
+      
+      setShowReportForm('success')
+      
+      // Reset after 3 seconds
+      setTimeout(() => {
+        setShowReportForm(false)
+        setSelectedBridge(null)
+        setIsLoading(false)
+      }, 3000)
+      
+      pushToast('Report submitted successfully! Our team will review it shortly.', 'success')
+      
+    } catch (error) {
+      console.error('Error submitting report:', error)
+      pushToast('Failed to submit report. Please try again.', 'error')
+      setIsLoading(false)
+    }
+  }
+
   // Close report form
   const handleCloseReportForm = () => {
     setShowReportForm(false)
     setSelectedBridge(null)
+    setFormData({
+      bridgeId: '',
+      title: '',
+      description: '',
+      issueType: ''
+    })
   }
 
   // Toggle filter panel
@@ -476,31 +696,57 @@ export default function LeafletMap() {
     setIsFilterExpanded(!isFilterExpanded)
   }
 
-  // Get visible bridge count
-  const getVisibleBridgeCount = () => {
-    return PROVIDED_BRIDGES.filter(b => {
-      if (query && !b.name.toLowerCase().includes(query.toLowerCase())) return false
-      if (healthFilter !== 'all') {
-        const cls = classification(b.bqi ?? 0)
-        const status = cls.label === 'Safe' ? 'Good' : cls.label
-        switch (healthFilter) {
-          case 'good': return status === 'Good'
-          case 'moderate': return status === 'Moderate'
-          case 'critical': return status === 'Critical'
-          default: return true
-        }
+  // Safe refresh bridges function
+  const handleRefreshBridges = async () => {
+    try {
+      setIsLoading(true)
+      if (refreshBridges && typeof refreshBridges === 'function') {
+        console.log('Refreshing bridges via context function')
+        await refreshBridges()
+      } else {
+        console.warn('refreshBridges not available in context')
+        window.dispatchEvent(new CustomEvent('bqi-bridges-updated'))
       }
-      return true
-    }).length
+    } catch (error) {
+      console.error('Error refreshing bridges:', error)
+      pushToast('Failed to refresh bridges: ' + (error.message || 'Unknown error'), 'error')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  // Clear all filters
+  const clearFilters = () => {
+    setQuery('')
+    setStatusFilter('all')
+  }
+  
+  // Format last update time
+  const formatUpdateTime = () => {
+    if (!lastUpdateTime) return 'Never'
+    const time = new Date(lastUpdateTime)
+    const now = new Date()
+    const diffMs = now - time
+    const diffMins = Math.floor(diffMs / 60000)
+    
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    const diffHours = Math.floor(diffMins / 60)
+    if (diffHours < 24) return `${diffHours}h ago`
+    return time.toLocaleDateString()
   }
   
   return (
-    <div className="page-full" style={{ position: 'relative', height: '100vh' }}>
-      {/* Top-Left Coordinates Display */}
+    <div style={{ 
+      position: 'relative', 
+      width: '100%',
+      minHeight: '600px'
+    }}>
+      {/* Bottom-Right Coordinates Display */}
       <div style={{
         position: 'absolute',
-        left: `${sidebarOffset}px`,
-        top: `${NAVBAR_HEIGHT + 20}px`,
+        right: '20px',
+        bottom: '20px',
         zIndex: 4000,
         background: 'rgba(255, 255, 255, 0.95)',
         padding: '12px 16px',
@@ -512,33 +758,61 @@ export default function LeafletMap() {
         border: '1px solid rgba(255, 255, 255, 0.2)',
         display: 'flex',
         flexDirection: 'column',
-        gap: '4px'
+        gap: '4px',
+        minWidth: '220px'
       }}>
         <div style={{ fontWeight: '600', fontSize: '11px', color: '#555' }}>
-          CURRENT VIEW
+          BRIDGE QUALITY MAP
         </div>
         <div style={{ color: '#333' }}>
           {coords.lat.toFixed(4)}, {coords.lng.toFixed(4)}
         </div>
         <div style={{ fontSize: '11px', color: '#666' }}>
-          Zoom: {coords.zoom} | Bridges: {getVisibleBridgeCount()}/{PROVIDED_BRIDGES.length}
-          {currentUser && (
-            <div style={{ marginTop: '4px', fontSize: '10px', color: currentUser.role === 'admin' ? '#8B5CF6' : '#10B981' }}>
-              Mode: {currentUser.role === 'admin' ? '👑 Admin' : '👤 User'}
+          Zoom: {coords.zoom} | Bridges: {visibleBridgesCount}/{(bridges||[]).length}
+          <div style={{ marginTop: '4px' }}>
+            Updated: {formatUpdateTime()}
+          </div>
+          {user && (
+            <div style={{ marginTop: '4px', fontSize: '10px', color: currentIsAdmin ? '#8B5CF6' : '#10B981' }}>
+              Mode: {currentIsAdmin ? '👑 Admin' : '👤 User'}
             </div>
           )}
         </div>
+        <button
+          onClick={handleRefreshBridges}
+          disabled={isLoading}
+          style={{
+            marginTop: '8px',
+            padding: '6px 12px',
+            background: 'linear-gradient(135deg, #6366f1, #8b5cf6)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '6px',
+            fontSize: '11px',
+            fontWeight: '500',
+            cursor: isLoading ? 'not-allowed' : 'pointer',
+            opacity: isLoading ? 0.7 : 1,
+            width: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px'
+          }}
+        >
+          {isLoading ? '🔄 Refreshing...' : '🔄 Refresh BQI'}
+        </button>
       </div>
       
       {/* Top-Right Filter Toggle Button */}
       <div style={{
         position: 'absolute',
         right: '20px',
-        top: `${NAVBAR_HEIGHT + 20}px`,
+        top: '20px',
         zIndex: 4001
       }}>
         <button
           onClick={toggleFilterPanel}
+          disabled={isLoading}
           style={{
             background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
             color: 'white',
@@ -553,15 +827,20 @@ export default function LeafletMap() {
             fontSize: '24px',
             boxShadow: '0 4px 15px rgba(31, 111, 235, 0.3)',
             transition: 'all 0.3s ease',
-            fontWeight: 'bold'
+            fontWeight: 'bold',
+            opacity: isLoading ? 0.7 : 1
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.transform = 'scale(1.1)'
-            e.currentTarget.style.boxShadow = '0 6px 20px rgba(31, 111, 235, 0.4)'
+            if (!isLoading) {
+              e.currentTarget.style.transform = 'scale(1.1)'
+              e.currentTarget.style.boxShadow = '0 6px 20px rgba(31, 111, 235, 0.4)'
+            }
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.transform = 'scale(1)'
-            e.currentTarget.style.boxShadow = '0 4px 15px rgba(31, 111, 235, 0.3)'
+            if (!isLoading) {
+              e.currentTarget.style.transform = 'scale(1)'
+              e.currentTarget.style.boxShadow = '0 4px 15px rgba(31, 111, 235, 0.3)'
+            }
           }}
         >
           {isFilterExpanded ? '−' : '+'}
@@ -572,7 +851,7 @@ export default function LeafletMap() {
       <div style={{
         position: 'absolute',
         right: '20px',
-        top: `${NAVBAR_HEIGHT + 80}px`,
+        top: '80px',
         zIndex: 4000,
         background: 'rgba(255, 255, 255, 0.98)',
         padding: isFilterExpanded ? '20px' : '0',
@@ -641,55 +920,6 @@ export default function LeafletMap() {
               </button>
             </div>
             
-            {/* User Mode Indicator */}
-            {currentUser && (
-              <div style={{
-                padding: '12px',
-                background: currentUser.role === 'admin' 
-                  ? 'linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(139, 92, 246, 0.05))'
-                  : 'linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(16, 185, 129, 0.05))',
-                borderRadius: '10px',
-                border: `1px solid ${currentUser.role === 'admin' ? 'rgba(139, 92, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}`,
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px'
-              }}>
-                <div style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '50%',
-                  background: currentUser.role === 'admin' 
-                    ? 'linear-gradient(135deg, #8B5CF6, #7C3AED)' 
-                    : 'linear-gradient(135deg, #10B981, #059669)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'white',
-                  fontSize: '16px',
-                  fontWeight: 'bold'
-                }}>
-                  {currentUser.role === 'admin' ? '👑' : '👤'}
-                </div>
-                <div>
-                  <div style={{ fontSize: '14px', fontWeight: '600', color: '#333' }}>
-                    {currentUser.name || currentUser.email.split('@')[0]}
-                  </div>
-                  <div style={{ 
-                    fontSize: '12px', 
-                    color: currentUser.role === 'admin' ? '#8B5CF6' : '#10B981',
-                    fontWeight: '500'
-                  }}>
-                    {currentUser.role === 'admin' ? 'Administrator Mode' : 'User Mode'}
-                    {currentUser.role === 'admin' && (
-                      <span style={{ display: 'block', fontSize: '11px', color: '#666', marginTop: '2px' }}>
-                        Submit report feature disabled
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-            
             {/* Search Input */}
             <div>
               <label style={{
@@ -707,6 +937,7 @@ export default function LeafletMap() {
                 placeholder="Type bridge name..."
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
+                disabled={isLoading}
                 style={{
                   width: '100%',
                   padding: '12px 14px',
@@ -716,22 +947,25 @@ export default function LeafletMap() {
                   outline: 'none',
                   transition: 'all 0.2s',
                   boxSizing: 'border-box',
-                  background: '#fafafa'
+                  background: isLoading ? '#f5f5f5' : '#fafafa',
+                  opacity: isLoading ? 0.7 : 1
                 }}
                 onFocus={(e) => {
-                  e.target.style.borderColor = '#1f6feb';
-                  e.target.style.background = '#fff';
-                  e.target.style.boxShadow = '0 0 0 4px rgba(31, 111, 235, 0.1)';
+                  if (!isLoading) {
+                    e.target.style.borderColor = '#1f6feb'
+                    e.target.style.background = '#fff'
+                    e.target.style.boxShadow = '0 0 0 4px rgba(31, 111, 235, 0.1)'
+                  }
                 }}
                 onBlur={(e) => {
-                  e.target.style.borderColor = '#e0e0e0';
-                  e.target.style.background = '#fafafa';
-                  e.target.style.boxShadow = 'none';
+                  e.target.style.borderColor = '#e0e0e0'
+                  e.target.style.background = '#fafafa'
+                  e.target.style.boxShadow = 'none'
                 }}
               />
             </div>
             
-            {/* Health Filter */}
+            {/* Status Filter */}
             <div>
               <label style={{
                 display: 'block',
@@ -741,14 +975,16 @@ export default function LeafletMap() {
                 color: '#444'
               }}>
                 <span style={{ marginRight: '8px' }}>🏥</span>
-                Health Status
+                Bridge Status
               </label>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                 {[
                   { value: 'all', label: 'All Status', color: 'linear-gradient(90deg, #2ecc71, #3498db, #f1c40f, #e67e22, #e74c3c)' },
-                  { value: 'good', label: 'Good (≥80)', color: '#2ecc71', emoji: '😀' },
-                  { value: 'moderate', label: 'Moderate (40-79)', color: '#f1c40f', emoji: '🙂' },
-                  { value: 'critical', label: 'Critical (<40)', color: '#e74c3c', emoji: '😢' }
+                  { value: 'excellent', label: 'Excellent (80-100)', color: '#2ecc71', emoji: '😀' },
+                  { value: 'good', label: 'Good (60-79)', color: '#3498db', emoji: '🙂' },
+                  { value: 'fair', label: 'Fair (40-59)', color: '#f1c40f', emoji: '😐' },
+                  { value: 'poor', label: 'Poor (20-39)', color: '#e67e22', emoji: '🙁' },
+                  { value: 'critical', label: 'Critical (0-19)', color: '#e74c3c', emoji: '😢' }
                 ].map((option) => (
                   <label
                     key={option.value}
@@ -760,28 +996,29 @@ export default function LeafletMap() {
                       padding: '12px',
                       borderRadius: '10px',
                       transition: 'all 0.2s',
-                      background: healthFilter === option.value ? '#f0f7ff' : 'transparent',
-                      border: healthFilter === option.value ? '2px solid #1f6feb' : '2px solid #eee'
+                      background: statusFilter === option.value ? '#f0f7ff' : 'transparent',
+                      border: statusFilter === option.value ? '2px solid #1f6feb' : '2px solid #eee'
                     }}
                     onMouseEnter={(e) => {
-                      if (healthFilter !== option.value) {
-                        e.currentTarget.style.background = '#f9f9f9';
-                        e.currentTarget.style.borderColor = '#ddd';
+                      if (statusFilter !== option.value) {
+                        e.currentTarget.style.background = '#f9f9f9'
+                        e.currentTarget.style.borderColor = '#ddd'
                       }
                     }}
                     onMouseLeave={(e) => {
-                      if (healthFilter !== option.value) {
-                        e.currentTarget.style.background = 'transparent';
-                        e.currentTarget.style.borderColor = '#eee';
+                      if (statusFilter !== option.value) {
+                        e.currentTarget.style.background = 'transparent'
+                        e.currentTarget.style.borderColor = '#eee'
                       }
                     }}
                   >
                     <input
                       type="radio"
-                      name="healthFilter"
+                      name="statusFilter"
                       value={option.value}
-                      checked={healthFilter === option.value}
-                      onChange={(e) => setHealthFilter(e.target.value)}
+                      checked={statusFilter === option.value}
+                      onChange={(e) => setStatusFilter(e.target.value)}
+                      disabled={isLoading}
                       style={{
                         cursor: 'pointer',
                         width: '18px',
@@ -821,19 +1058,18 @@ export default function LeafletMap() {
                 marginBottom: '8px'
               }}>
                 <div style={{ fontSize: '14px', fontWeight: '500', color: '#444' }}>
-                  Showing {getVisibleBridgeCount()} of {PROVIDED_BRIDGES.length} bridges
+                  Showing {visibleBridgesCount} of {(bridges||[]).length} bridges
                 </div>
                 <div style={{
                   padding: '6px 12px',
-                  background: healthFilter === 'all' ? '#f0f7ff' : '#f8f9fa',
+                  background: statusFilter === 'all' ? '#f0f7ff' : '#f8f9fa',
                   borderRadius: '20px',
                   fontSize: '12px',
                   fontWeight: '500',
-                  color: healthFilter === 'all' ? '#1f6feb' : '#666'
+                  color: statusFilter === 'all' ? '#1f6feb' : '#666'
                 }}>
-                  {healthFilter === 'all' ? 'All' : 
-                   healthFilter === 'good' ? 'Good' :
-                   healthFilter === 'moderate' ? 'Moderate' : 'Critical'}
+                  {statusFilter === 'all' ? 'All' : 
+                   statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)}
                 </div>
               </div>
               <div style={{ 
@@ -846,12 +1082,10 @@ export default function LeafletMap() {
             </div>
             
             {/* Clear Filters Button */}
-            {(query || healthFilter !== 'all') && (
+            {(query || statusFilter !== 'all') && (
               <button
-                onClick={() => {
-                  setQuery('');
-                  setHealthFilter('all');
-                }}
+                onClick={clearFilters}
+                disabled={isLoading}
                 style={{
                   width: '100%',
                   padding: '12px',
@@ -861,23 +1095,28 @@ export default function LeafletMap() {
                   fontSize: '14px',
                   fontWeight: '500',
                   color: '#666',
-                  cursor: 'pointer',
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
                   transition: 'all 0.2s',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '8px',
-                  marginTop: '8px'
+                  marginTop: '8px',
+                  opacity: isLoading ? 0.7 : 1
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #e9ecef, #dee2e6)';
-                  e.currentTarget.style.borderColor = '#ccc';
-                  e.currentTarget.style.color = '#555';
+                  if (!isLoading) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #e9ecef, #dee2e6)'
+                    e.currentTarget.style.borderColor = '#ccc'
+                    e.currentTarget.style.color = '#555'
+                  }
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'linear-gradient(135deg, #f8f9fa, #e9ecef)';
-                  e.currentTarget.style.borderColor = '#ddd';
-                  e.currentTarget.style.color = '#666';
+                  if (!isLoading) {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #f8f9fa, #e9ecef)'
+                    e.currentTarget.style.borderColor = '#ddd'
+                    e.currentTarget.style.color = '#666'
+                  }
                 }}
               >
                 <span>🗑️</span>
@@ -893,15 +1132,17 @@ export default function LeafletMap() {
         ref={containerRef}
         style={{
           width: '100%',
-          height: `calc(100vh - ${NAVBAR_HEIGHT}px)`,
-          marginTop: NAVBAR_HEIGHT
+          height: 'calc(100vh - 120px)',
+          borderRadius: '12px',
+          overflow: 'hidden',
+          boxShadow: '0 8px 30px rgba(0,0,0,0.12)'
         }}
       />
       
-      {/* Bottom-Left BQI Legend */}
+      {/* Bottom-Left Status Legend */}
       <div style={{
         position: 'absolute',
-        left: `${sidebarOffset}px`,
+        left: '20px',
         bottom: '20px',
         zIndex: 4000,
         background: 'rgba(255, 255, 255, 0.98)',
@@ -911,7 +1152,7 @@ export default function LeafletMap() {
         boxShadow: '0 8px 25px rgba(0,0,0,0.15)',
         backdropFilter: 'blur(10px)',
         border: '1px solid rgba(255, 255, 255, 0.3)',
-        width: '220px'
+        width: '240px'
       }}>
         <div style={{ 
           fontWeight: '600', 
@@ -923,15 +1164,15 @@ export default function LeafletMap() {
           gap: '8px'
         }}>
           <span style={{ fontSize: '18px' }}>📊</span>
-          BQI Score Legend
+          Bridge Quality Index (BQI)
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {[
-            { color: '#2ecc71', label: 'Good', range: '80-100', emoji: '😀' },
-            { color: '#3498db', label: 'Moderate', range: '60-79', emoji: '🙂' },
-            { color: '#f1c40f', label: 'Fair', range: '40-59', emoji: '😐' },
-            { color: '#e67e22', label: 'Poor', range: '20-39', emoji: '🙁' },
-            { color: '#e74c3c', label: 'Critical', range: '<20', emoji: '😢' }
+            { range: '80-100', label: 'Excellent', color: '#2ecc71', emoji: '😀', desc: 'Safe' },
+            { range: '60-79', label: 'Good', color: '#3498db', emoji: '🙂', desc: 'Stable' },
+            { range: '40-59', label: 'Fair', color: '#f1c40f', emoji: '😐', desc: 'Monitor' },
+            { range: '20-39', label: 'Poor', color: '#e67e22', emoji: '🙁', desc: 'Caution' },
+            { range: '0-19', label: 'Critical', color: '#e74c3c', emoji: '😢', desc: 'Danger' }
           ].map((item) => (
             <div key={item.label} style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <div style={{
@@ -944,7 +1185,7 @@ export default function LeafletMap() {
               }} />
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: '500', color: '#333', fontSize: '13px' }}>{item.label}</div>
-                <div style={{ fontSize: '11px', color: '#666' }}>{item.range}</div>
+                <div style={{ fontSize: '11px', color: '#666' }}>{item.range} - {item.desc}</div>
               </div>
               <span style={{ fontSize: '18px' }}>{item.emoji}</span>
             </div>
@@ -952,8 +1193,8 @@ export default function LeafletMap() {
         </div>
       </div>
       
-      {/* Report Form Modal - Only show for non-admin users */}
-      {showReportForm && selectedBridge && currentUser && currentUser.role !== 'admin' && (
+      {/* Report Form Modal - FIXED: Fixed select input stretching */}
+      {showReportForm && selectedBridge && user && !currentIsAdmin && (
         <div style={{
           position: 'fixed',
           top: 0,
@@ -1019,65 +1260,128 @@ export default function LeafletMap() {
               borderRadius: '16px',
               padding: '30px',
               maxWidth: '500px',
-              width: '90%',
+              width: '90%', // FIXED: Changed from '100%' to '90%'
               maxHeight: '90vh',
               overflowY: 'auto',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.2)'
+              boxShadow: '0 20px 60px rgba(0,0,0,0.3)',
+              position: 'relative'
             }}>
-              <div style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '25px'
-              }}>
+              {/* Close Button */}
+              <button
+                onClick={handleCloseReportForm}
+                style={{
+                  position: 'absolute',
+                  right: '20px',
+                  top: '20px',
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '24px',
+                  cursor: 'pointer',
+                  color: '#6b7280',
+                  padding: '4px',
+                  borderRadius: '4px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '32px',
+                  height: '32px'
+                }}
+                onMouseEnter={(e) => e.currentTarget.style.background = '#f3f4f6'}
+                onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+              >
+                ×
+              </button>
+
+              {/* Form Header */}
+              <div style={{ marginBottom: '24px' }}>
                 <h3 style={{
                   margin: 0,
-                  color: '#333'
+                  color: '#1f2937',
+                  fontSize: '22px',
+                  fontWeight: '600',
+                  marginBottom: '8px'
                 }}>
                   Submit Report for {selectedBridge.name}
                 </h3>
-                <button
-                  onClick={handleCloseReportForm}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    fontSize: '24px',
-                    cursor: 'pointer',
-                    color: '#666'
-                  }}
-                >
-                  &times;
-                </button>
+                <p style={{ margin: 0, color: '#6b7280', fontSize: '14px' }}>
+                  Provide details about the bridge issue you've identified
+                </p>
               </div>
-              
-              <form onSubmit={handleSubmitReport} style={{
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '20px'
-              }}>
+
+              {/* Form - FIXED: Fixed select input styling */}
+              <form onSubmit={handleSubmitReport} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                {/* Bridge Selection (Pre-filled since we're on the map) */}
                 <div>
                   <label style={{
                     display: 'block',
                     marginBottom: '8px',
                     fontWeight: '500',
-                    color: '#333'
+                    color: '#374151',
+                    fontSize: '14px'
                   }}>
+                    <span style={{ marginRight: '6px' }}>🌉</span>
+                    Selected Bridge
+                  </label>
+                  <div style={{
+                    width: '100%',
+                    padding: '12px 14px',
+                    border: '2px solid #e5e7eb',
+                    borderRadius: '10px',
+                    fontSize: '14px',
+                    background: '#f9fafb',
+                    color: '#374151',
+                    boxSizing: 'border-box' // ADDED
+                  }}>
+                    {selectedBridge.name} {selectedBridge.bqi ? `(BQI: ${selectedBridge.bqi})` : ''}
+                  </div>
+                  <input type="hidden" name="bridgeId" value={selectedBridge.id} />
+                </div>
+
+                {/* Issue Type - FIXED: Fixed stretched select */}
+                <div>
+                  <label style={{
+                    display: 'block',
+                    marginBottom: '8px',
+                    fontWeight: '500',
+                    color: '#374151',
+                    fontSize: '14px'
+                  }}>
+                    <span style={{ marginRight: '6px' }}>⚠️</span>
                     Issue Type *
                   </label>
                   <select
                     name="issueType"
+                    value={formData.issueType}
+                    onChange={handleInputChange}
                     required
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '10px',
                       fontSize: '14px',
                       background: 'white',
-                      outline: 'none'
+                      outline: 'none',
+                      transition: 'all 0.2s',
+                      cursor: 'pointer',
+                      boxSizing: 'border-box', // ADDED
+                      appearance: 'none', // ADDED for better styling
+                      backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%236b7280' viewBox='0 0 16 16'%3E%3Cpath d='M7.247 11.14 2.451 5.658C1.885 5.013 2.345 4 3.204 4h9.592a1 1 0 0 1 .753 1.659l-4.796 5.48a1 1 0 0 1-1.506 0z'/%3E%3C/svg%3E")`,
+                      backgroundRepeat: 'no-repeat',
+                      backgroundPosition: 'right 14px center',
+                      backgroundSize: '16px',
+                      paddingRight: '40px'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1f6feb'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(31, 111, 235, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb'
+                      e.target.style.boxShadow = 'none'
                     }}
                   >
-                    <option value="">Select issue type</option>
+                    <option value="">Select issue type...</option>
                     <option value="structural">🏗️ Structural Damage</option>
                     <option value="corrosion">🦠 Corrosion/Rust</option>
                     <option value="cracks">⚡ Cracks/Fractures</option>
@@ -1088,96 +1392,188 @@ export default function LeafletMap() {
                     <option value="other">❓ Other Issue</option>
                   </select>
                 </div>
-                
+
+                {/* Title */}
                 <div>
                   <label style={{
                     display: 'block',
                     marginBottom: '8px',
                     fontWeight: '500',
-                    color: '#333'
+                    color: '#374151',
+                    fontSize: '14px'
                   }}>
+                    <span style={{ marginRight: '6px' }}>📝</span>
                     Report Title *
                   </label>
                   <input
                     type="text"
                     name="title"
-                    required
+                    value={formData.title}
+                    onChange={handleInputChange}
                     placeholder="Brief title describing the issue..."
+                    required
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
+                      padding: '12px 14px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '10px',
                       fontSize: '14px',
-                      outline: 'none'
+                      outline: 'none',
+                      transition: 'all 0.2s',
+                      boxSizing: 'border-box',
+                      background: '#fafafa'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1f6feb'
+                      e.target.style.background = '#fff'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(31, 111, 235, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb'
+                      e.target.style.background = '#fafafa'
+                      e.target.style.boxShadow = 'none'
                     }}
                   />
                 </div>
-                
+
+                {/* Description */}
                 <div>
                   <label style={{
                     display: 'block',
                     marginBottom: '8px',
                     fontWeight: '500',
-                    color: '#333'
+                    color: '#374151',
+                    fontSize: '14px'
                   }}>
-                    Description *
+                    <span style={{ marginRight: '6px' }}>📋</span>
+                    Detailed Description *
                   </label>
                   <textarea
                     name="description"
+                    value={formData.description}
+                    onChange={handleInputChange}
+                    placeholder="Provide detailed information about the issue, including location, severity, and any visible signs..."
                     required
-                    placeholder="Describe the issue in detail. Include location, severity, and any visible signs..."
+                    rows={6}
                     style={{
                       width: '100%',
-                      padding: '12px',
-                      border: '1px solid #ddd',
-                      borderRadius: '8px',
-                      minHeight: '120px',
-                      resize: 'vertical',
+                      padding: '12px 14px',
+                      border: '2px solid #e5e7eb',
+                      borderRadius: '10px',
                       fontSize: '14px',
+                      outline: 'none',
+                      transition: 'all 0.2s',
+                      resize: 'vertical',
+                      minHeight: '120px',
                       fontFamily: 'inherit',
-                      outline: 'none'
+                      boxSizing: 'border-box',
+                      background: '#fafafa'
+                    }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = '#1f6feb'
+                      e.target.style.background = '#fff'
+                      e.target.style.boxShadow = '0 0 0 3px rgba(31, 111, 235, 0.1)'
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = '#e5e7eb'
+                      e.target.style.background = '#fafafa'
+                      e.target.style.boxShadow = 'none'
                     }}
                   />
                 </div>
-                
+
+                {/* User Info */}
+                <div style={{
+                  background: '#f8f9fa',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                  color: '#666'
+                }}>
+                  <div style={{ fontWeight: '500', marginBottom: '4px' }}>Reporting as:</div>
+                  <div>{user.name || user.email?.split('@')[0] || 'Anonymous'} ({user.email || 'No email'})</div>
+                </div>
+
+                {/* Form Actions */}
                 <div style={{
                   display: 'flex',
                   gap: '12px',
-                  marginTop: '10px'
+                  marginTop: '10px',
+                  paddingTop: '20px',
+                  borderTop: '1px solid #e5e7eb'
                 }}>
                   <button
                     type="button"
                     onClick={handleCloseReportForm}
+                    disabled={isLoading}
                     style={{
                       flex: 1,
                       padding: '14px',
-                      border: '1px solid #ddd',
-                      background: '#f8f9fa',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
+                      border: '2px solid #e5e7eb',
+                      background: '#f9fafb',
+                      borderRadius: '10px',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
                       fontWeight: '500',
                       fontSize: '14px',
-                      color: '#333'
+                      color: '#374151',
+                      transition: 'all 0.2s',
+                      opacity: isLoading ? 0.6 : 1
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.background = '#f3f4f6'
+                        e.currentTarget.style.borderColor = '#d1d5db'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.background = '#f9fafb'
+                        e.currentTarget.style.borderColor = '#e5e7eb'
+                      }
                     }}
                   >
                     Cancel
                   </button>
                   <button
                     type="submit"
+                    disabled={isLoading}
                     style={{
                       flex: 1,
                       padding: '14px',
-                      background: 'linear-gradient(90deg, #1f6feb, #3fb0ff)',
+                      background: 'linear-gradient(135deg, #1f6feb, #3fb0ff)',
                       color: 'white',
                       border: 'none',
-                      borderRadius: '8px',
-                      cursor: 'pointer',
-                      fontWeight: '500',
-                      fontSize: '14px'
+                      borderRadius: '10px',
+                      cursor: isLoading ? 'not-allowed' : 'pointer',
+                      fontWeight: '600',
+                      fontSize: '14px',
+                      transition: 'all 0.2s',
+                      opacity: isLoading ? 0.6 : 1
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'translateY(-1px)'
+                        e.currentTarget.style.boxShadow = '0 4px 12px rgba(31, 111, 235, 0.3)'
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isLoading) {
+                        e.currentTarget.style.transform = 'translateY(0)'
+                        e.currentTarget.style.boxShadow = 'none'
+                      }
                     }}
                   >
-                    Submit Report
+                    {isLoading ? (
+                      <>
+                        <span style={{ marginRight: '8px' }}>⏳</span>
+                        Submitting...
+                      </>
+                    ) : (
+                      <>
+                        <span style={{ marginRight: '8px' }}>📤</span>
+                        Submit Report
+                      </>
+                    )}
                   </button>
                 </div>
               </form>
@@ -1186,13 +1582,22 @@ export default function LeafletMap() {
         </div>
       )}
       
+      {/* Toasts */}
+      <div>
+        {toasts.map(t => <Toast key={t.id} msg={t} />)}
+      </div>
+
+      
+      
       {/* Styles */}
       <style>{`
         .glow-marker {
-          width: 24px;
-          height: 24px;
+          width: 32px;
+          height: 32px;
           border-radius: 50%;
           position: relative;
+          animation: pulse 2s infinite;
+          cursor: pointer;
         }
         
         .glow-marker::after {
@@ -1201,11 +1606,24 @@ export default function LeafletMap() {
           top: 50%;
           left: 50%;
           transform: translate(-50%, -50%);
-          width: 100%;
-          height: 100%;
+          width: 140%;
+          height: 140%;
           border-radius: 50%;
-          box-shadow: 0 0 20px currentColor;
-          opacity: 0.7;
+          background: radial-gradient(circle, rgba(255,255,255,0.3) 0%, transparent 70%);
+          opacity: 0.8;
+          z-index: -1;
+        }
+        
+        @keyframes pulse {
+          0% {
+            box-shadow: 0 0 0 0 rgba(46, 204, 113, 0.7);
+          }
+          70% {
+            box-shadow: 0 0 0 15px rgba(46, 204, 113, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(46, 204, 113, 0);
+          }
         }
         
         .leaflet-container {
@@ -1226,52 +1644,102 @@ export default function LeafletMap() {
           filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
         }
         
+        .cluster-marker {
+          animation: clusterPulse 3s infinite;
+        }
+        
+        .cluster-icon {
+          transition: transform 0.3s ease;
+        }
+        
+        .cluster-icon:hover {
+          transform: scale(1.1);
+        }
+        
+        @keyframes clusterPulse {
+          0%, 100% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.05);
+          }
+        }
+        
+        @keyframes slideIn {
+          from {
+            opacity: 0;
+            transform: translateX(100px);
+          }
+          to {
+            opacity: 1;
+            transform: translateX(0);
+          }
+        }
+        
         input:focus, select:focus, textarea:focus {
           border-color: #1f6feb !important;
           box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.1) !important;
         }
         
-        button:hover {
+        button:hover:not(:disabled) {
           opacity: 0.9;
           transform: translateY(-1px);
         }
         
-        button:active {
+        button:active:not(:disabled) {
           transform: translateY(0);
         }
         
         /* Responsive design */
         @media (max-width: 768px) {
+          .coordinates-panel {
+            right: 10px !important;
+            bottom: 10px !important;
+            min-width: 180px !important;
+            font-size: 11px !important;
+            padding: 10px 12px !important;
+          }
+          
+          .filter-toggle {
+            width: 40px !important;
+            height: 40px !important;
+            right: 10px !important;
+            top: 10px !important;
+            font-size: 20px !important;
+          }
+          
           .filter-panel {
             width: 280px !important;
             right: 10px !important;
-          }
-          
-          .toggle-button {
-            width: 45px !important;
-            height: 45px !important;
-            right: 10px !important;
+            top: 60px !important;
           }
           
           .legend-panel {
             width: 200px !important;
-            right: 10px !important;
-            bottom: 10px !important;
+            left: 10px !important;
+            bottom: 120px !important;
+            padding: 12px !important;
+            font-size: 11px !important;
           }
           
-          .coordinates-panel {
-            left: 10px !important;
-            top: 70px !important;
+          .map-container {
+            height: calc(100vh - 120px) !important;
           }
         }
         
         @media (max-width: 480px) {
+          .coordinates-panel {
+            min-width: 160px !important;
+            padding: 8px 10px !important;
+          }
+          
           .filter-panel {
             width: 260px !important;
           }
           
           .legend-panel {
             width: 180px !important;
+            bottom: 140px !important;
           }
         }
       `}</style>

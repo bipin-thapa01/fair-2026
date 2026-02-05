@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import Sidebar from '../../components/Sidebar'
 import Topbar from '../../components/Topbar'
+import api from '../../lib/api'
 
 function Toast({ msg, type }) {
   if (!msg) return null
@@ -60,9 +61,8 @@ const sampleUsers = [
 
 export default function Users() {
   const [roleFilter, setRoleFilter] = useState('all')
-  const [statusFilter, setStatusFilter] = useState('all')
   const [searchTerm, setSearchTerm] = useState('')
-  const [users, setUsers] = useState(sampleUsers)
+  const [users, setUsers] = useState([])
   const [selectedUsers, setSelectedUsers] = useState([])
   const [bulkAction, setBulkAction] = useState('')
   const [toast, setToast] = useState(null)
@@ -73,7 +73,7 @@ export default function Users() {
     name: '',
     email: '',
     role: 'user',
-    status: 'active'
+    password: ''
   })
   const [asideOpen, setAsideOpen] = useState(false)
 
@@ -86,24 +86,15 @@ export default function Users() {
   useEffect(() => {
     const fetchUsers = async () => {
       try {
-        const token = localStorage.getItem('bqi_token')
-        const response = await fetch('/api/admin/users', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          }
-        })
-        
-        if (response.ok) {
-          const data = await response.json()
-          setUsers(data)
-        }
+        const data = await api.getUsers()
+        setUsers(Array.isArray(data) ? data : [])
       } catch (error) {
         console.error('Error fetching users:', error)
-        // Use sample data as fallback
+        // fallback to sample data
+        setUsers(sampleUsers)
       }
     }
-    
+
     fetchUsers()
   }, [])
 
@@ -113,14 +104,13 @@ export default function Users() {
   }
 
   const filteredUsers = users.filter(user => {
-    const matchesRole = roleFilter === 'all' || user.role === roleFilter
-    const matchesStatus = statusFilter === 'all' || user.status === statusFilter
+    const roleLowerVal = (user.role || '').toString().toLowerCase()
+    const matchesRole = roleFilter === 'all' || roleLowerVal === roleFilter
     const matchesSearch = searchTerm === '' || 
-      user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      user.role.toLowerCase().includes(searchTerm.toLowerCase())
-    
-    return matchesRole && matchesStatus && matchesSearch
+      (user.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (user.email || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (user.role || '').toLowerCase().includes(searchTerm.toLowerCase())
+    return matchesRole && matchesSearch
   })
 
   const getRoleColor = (role) => {
@@ -186,27 +176,38 @@ export default function Users() {
     e.preventDefault()
     
     try {
-      const token = localStorage.getItem('bqi_token')
-      const response = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          ...newUser,
-          joined: new Date().toISOString().split('T')[0],
-          lastLogin: 'Never'
-        })
-      })
+      // Create user via auth signup endpoint (name, email, password)
+      const auth = await api.authSignup({ name: newUser.name, email: newUser.email, password: newUser.password })
+      // fetch full user
+      const created = await api.getUser(auth.userId)
 
-      if (response.ok) {
-        const user = await response.json()
-        setUsers(prev => [...prev, user])
-        notify('User added successfully', 'success')
-        setShowAddUserModal(false)
-        setNewUser({ name: '', email: '', role: 'user', status: 'active' })
+      let finalUser = created
+
+      // If admin provided a different role, attempt to update it via admin PUT (if available)
+      try {
+        const token = localStorage.getItem('bqi_token')
+        if (token && newUser.role && (newUser.role || 'user') !== (created.role || 'user')) {
+          const resp = await fetch(`/api/admin/users/${created.id}`, {
+            method: 'PUT',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ ...created, role: newUser.role })
+          })
+          if (resp.ok) {
+            finalUser = await resp.json()
+          }
+        }
+      } catch (err) {
+        // non-fatal: role update may not be supported by backend; continue with created user
+        console.warn('role update failed or not supported', err)
       }
+
+      setUsers(prev => [...prev, finalUser])
+      notify('User added successfully', 'success')
+      setShowAddUserModal(false)
+      setNewUser({ name: '', email: '', role: 'user', password: '' })
     } catch (error) {
       notify('Failed to add user', 'error')
     }
@@ -430,37 +431,7 @@ export default function Users() {
                 </select>
               </div>
 
-              <div>
-                <label style={{
-                  display: 'block',
-                  marginBottom: '8px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-                  color: '#1E293B'
-                }}>
-                  Filter by Status
-                </label>
-                <select
-                  value={statusFilter}
-                  onChange={(e) => setStatusFilter(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '12px',
-                    borderRadius: '8px',
-                    border: '1px solid #E2E8F0',
-                    background: '#F8FAFC',
-                    fontSize: '14px',
-                    outline: 'none',
-                    cursor: 'pointer'
-                  }}
-                >
-                  <option value="all">All Status</option>
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="pending">Pending</option>
-                  <option value="suspended">Suspended</option>
-                </select>
-              </div>
+              
             </div>
 
             {/* Bulk Actions */}
@@ -571,9 +542,8 @@ export default function Users() {
                     <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>User</th>
                     <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Email</th>
                     <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Role</th>
-                    <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Status</th>
-                    <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Last Login</th>
-                    <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Actions</th>
+                    <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Password</th>
+                    <th style={{ textAlign: 'left', padding: '12px', fontSize: '12px', color: '#64748B', fontWeight: '600', textTransform: 'uppercase' }}>Created At</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -600,7 +570,7 @@ export default function Users() {
                       <td style={{ padding: '12px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                           <img 
-                            src={user.avatar} 
+                            src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name||'User')}&background=0F766E&color=fff`} 
                             alt={user.name}
                             style={{
                               width: '40px',
@@ -614,7 +584,7 @@ export default function Users() {
                               {user.name}
                             </div>
                             <div style={{ fontSize: '13px', color: '#64748B' }}>
-                              Joined {user.joined}
+                              {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : ''}
                             </div>
                           </div>
                         </div>
@@ -639,73 +609,11 @@ export default function Users() {
                           {user.role}
                         </div>
                       </td>
-                      <td style={{ padding: '12px' }}>
-                        <div style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          background: getStatusColor(user.status) + '20',
-                          color: getStatusColor(user.status),
-                          padding: '6px 12px',
-                          borderRadius: '20px',
-                          fontSize: '13px',
-                          fontWeight: '600',
-                          textTransform: 'capitalize'
-                        }}>
-                          <span>{getStatusIcon(user.status)}</span>
-                          {user.status}
-                        </div>
+                      <td style={{ padding: '12px', fontSize: '14px', color: '#1E293B' }}>
+                        {user.password}
                       </td>
                       <td style={{ padding: '12px', fontSize: '14px', color: '#64748B' }}>
-                        {user.lastLogin}
-                      </td>
-                      <td style={{ padding: '12px' }}>
-                        <div style={{ display: 'flex', gap: '8px' }}>
-                          <button
-                            onClick={() => handleEditUser(user)}
-                            style={{
-                              padding: '6px 12px',
-                              background: 'rgba(59, 130, 246, 0.1)',
-                              color: '#3B82F6',
-                              border: '1px solid rgba(59, 130, 246, 0.2)',
-                              borderRadius: '6px',
-                              fontSize: '12px',
-                              fontWeight: '500',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'rgba(59, 130, 246, 0.2)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'rgba(59, 130, 246, 0.1)';
-                            }}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => handleDeleteUser(user.id)}
-                            style={{
-                              padding: '6px 12px',
-                              background: 'rgba(239, 68, 68, 0.1)',
-                              color: '#DC2626',
-                              border: '1px solid rgba(239, 68, 68, 0.2)',
-                              borderRadius: '6px',
-                              fontSize: '12px',
-                              fontWeight: '500',
-                              cursor: 'pointer',
-                              transition: 'all 0.2s ease'
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
-                            }}
-                          >
-                            Delete
-                          </button>
-                        </div>
+                        {user.createdAt ? new Date(user.createdAt).toLocaleString() : ''}
                       </td>
                     </tr>
                   ))}
@@ -738,7 +646,7 @@ export default function Users() {
                   color: '#64748B',
                   fontSize: '14px'
                 }}>
-                  {searchTerm || roleFilter !== 'all' || statusFilter !== 'all' 
+                  {searchTerm || roleFilter !== 'all' 
                     ? 'Try adjusting your search or filters'
                     : 'No users in the system yet. Add your first user!'}
                 </p>
@@ -769,11 +677,10 @@ export default function Users() {
             }}>
               {[
                 { label: 'Total Users', value: users.length, icon: '👥', color: '#3B82F6' },
-                { label: 'Active Users', value: users.filter(u => u.status === 'active').length, icon: '🟢', color: '#10B981' },
-                { label: 'Admins', value: users.filter(u => u.role === 'admin').length, icon: '👑', color: '#8B5CF6' },
-                { label: 'Inspectors', value: users.filter(u => u.role === 'inspector').length, icon: '🔍', color: '#EC4899' },
-                { label: 'Government', value: users.filter(u => u.role === 'government').length, icon: '🏛️', color: '#F59E0B' },
-                { label: 'Pending', value: users.filter(u => u.status === 'pending').length, icon: '⏳', color: '#F97316' },
+                { label: 'Admins', value: users.filter(u => (u.role||'').toString().toLowerCase() === 'admin').length, icon: '👑', color: '#8B5CF6' },
+                { label: 'Inspectors', value: users.filter(u => (u.role||'').toString().toLowerCase() === 'inspector').length, icon: '🔍', color: '#EC4899' },
+                { label: 'Government', value: users.filter(u => (u.role||'').toString().toLowerCase() === 'government').length, icon: '🏛️', color: '#F59E0B' },
+                { label: 'Users', value: users.filter(u => (u.role||'').toString().toLowerCase() === 'user').length, icon: '👤', color: '#10B981' }
               ].map((stat, index) => (
                 <div key={index} style={{
                   background: stat.color + '10',
@@ -798,7 +705,7 @@ export default function Users() {
                       <div style={{ fontSize: '12px', color: '#64748B', marginBottom: '4px' }}>
                         {stat.label}
                       </div>
-                      <div style={{ fontSize: '24px', fontWeight: '700', color: stat.color }}>
+                      <div style={{ fontSize: '18px', fontWeight: '700', color: '#1E293B' }}>
                         {stat.value}
                       </div>
                     </div>
@@ -924,9 +831,6 @@ export default function Users() {
                   }}
                 >
                   <option value="user">User</option>
-                  <option value="admin">Admin</option>
-                  <option value="inspector">Inspector</option>
-                  <option value="government">Government</option>
                 </select>
               </div>
 
@@ -938,11 +842,14 @@ export default function Users() {
                   fontWeight: '600',
                   color: '#1E293B'
                 }}>
-                  Status
+                  Password
                 </label>
-                <select
-                  value={newUser.status}
-                  onChange={(e) => setNewUser({...newUser, status: e.target.value})}
+                <input
+                  type="password"
+                  value={newUser.password}
+                  onChange={(e) => setNewUser({...newUser, password: e.target.value})}
+                  required
+                  placeholder="Enter password"
                   style={{
                     width: '100%',
                     padding: '12px 16px',
@@ -950,22 +857,17 @@ export default function Users() {
                     border: '1px solid #E2E8F0',
                     background: '#F8FAFC',
                     fontSize: '14px',
-                    outline: 'none',
-                    cursor: 'pointer'
+                    outline: 'none'
                   }}
-                >
-                  <option value="active">Active</option>
-                  <option value="inactive">Inactive</option>
-                  <option value="pending">Pending</option>
-                </select>
+                />
               </div>
 
               <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
-                  onClick={() => {
+                    onClick={() => {
                     setShowAddUserModal(false)
-                    setNewUser({ name: '', email: '', role: 'user', status: 'active' })
+                    setNewUser({ name: '', email: '', role: 'user', password: '' })
                   }}
                   style={{
                     padding: '12px 24px',
